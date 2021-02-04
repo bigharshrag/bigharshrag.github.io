@@ -2,23 +2,23 @@
 layout: about
 title: about
 permalink: /
-description: <a href="#">Affiliations</a>. Address. Contacts. Moto. Etc.
+# description: <a href="#">Affiliations</a>. Address. Contacts. Moto. Etc.
 
 profile:
   align: right
-  image: prof_pic.jpg
-  address: >
-    <p>555 your office number</p>
-    <p>123 your address street</p>
-    <p>Your City, State 12345</p>
+  image: prof_img.jpeg
+  # address: >
+    # <p>rishabh [at] cs [dot] utexas [dot] edu</p>
 
-news: true  # includes a list of news items
+news: false  # includes a list of news items
 selected_papers: true # includes a list of papers marked as "selected={true}"
-social: true  # includes social icons at the bottom of the page
+social: false  # includes social icons at the bottom of the page
 ---
 
-Write your biography here. Tell the world about yourself. Link to your favorite [subreddit](http://reddit.com){:target="\_blank"}. You can put a picture in, too. The code is already in, just name your picture `prof_pic.jpg` and put it in the `img/` folder.
+I am a second year Masters in Computer Science student at The University of Texas at Austin. I have been working with [Prof. Kristen Grauman](https://www.cs.utexas.edu/~grauman/) on Audio-Visual Learning from Videos as a part of my masters thesis. Broadly, my research interests are in the area of computer vision and currently I am working on using spatial audio information in 360 videos to extract regions of interest for better audio-visual features.
 
-Put your address / P.O. box / other info right below your picture. You can also disable any these elements by editing `profile` property of the YAML header of your `_pages/about.md`. Edit `_bibliography/papers.bib` and Jekyll will render your [publications page](/al-folio/publications/) automatically.
+During the summer of 2020, I interned at Amazon working in the Traffic Mirroring team at AWS.
 
-Link to your social media connections, too. This theme is set up to use [Font Awesome icons](http://fortawesome.github.io/Font-Awesome/){:target="\_blank"} and [Academicons](https://jpswalsh.github.io/academicons/){:target="\_blank"}, like the ones below. Add your Facebook, Twitter, LinkedIn, Google Scholar, or just disable all of them.
+Before joining UT, I completed my undergrad in Computer Science and Engineering from [IIIT-Delhi](https://www.iiitd.ac.in/). For my undergraduate thesis, I worked at the [Image Analysis and Biometrics Lab](http://www.iab-rubric.org/) at IIITD jointly advised by [Dr. Mayank Vatsa](http://home.iitj.ac.in/~mvatsa/) and [Dr. Richa Singh](http://home.iitj.ac.in/~richa/). During my undergrad, I also spent summers interning at Goldman Sachs, and CCExtractor for the [Google Summer of Code](https://summerofcode.withgoogle.com/archive/2016/projects/5348332989841408/).
+
+**[CV](assets/pdf/Resume.pdf) \| [E-Mail](mailto:rishabh@cs.utexas.edu) \| [Google Scholar](https://scholar.google.com/citations?user=mnEnXDkAAAAJ&hl=en)   \| [LinkedIn](linkedin.com/in/rishabhgr) \| [Github](https://github.com/bigharshrag)**
