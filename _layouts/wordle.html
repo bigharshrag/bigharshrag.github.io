@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    {% include head.html %}
+    {% include scripts/mathjax.html %}
+    <script src='https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js'></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .upload-section {
+            margin: 2rem 0 4rem 0;
+            padding: 2rem;
+            border: 2px dashed #ccc;
+            border-radius: 10px;
+            background: #f9f9f9;
+            text-align: center;
+        }
+
+        .upload-button {
+            display: inline-block;
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+            color: white;
+            background: #2196F3;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            font-weight: 500;
+        }
+
+        .upload-button:hover {
+            background: #1976D2;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
+        }
+
+        .preview-section {
+            margin: 2rem 0;
+            display: none;
+            text-align: center;
+        }
+
+        .preview-section img, 
+        .preview-section canvas {
+            max-width: 300px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .results-section {
+            margin: 3rem auto;
+            max-width: 90%;
+            text-align: left;
+        }
+
+        .results-section h2 {
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .detected-keys {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .key-category {
+            padding: 1rem;
+            border-radius: 8px;
+            background: #f5f5f5;
+            text-align: center;
+        }
+
+        .key-category h3 {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 0.8rem;
+            color: #333;
+        }
+
+        .word-results {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 2rem;
+            margin: 3rem 0;
+        }
+
+        .word-list {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+            text-align: left;
+        }
+
+        .word-list h3 {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 1.2rem;
+            color: #333;
+        }
+
+        .word-item {
+            display: inline-block;
+            margin: 0.3rem;
+            padding: 0.5rem 1rem;
+            background: #f0f0f0;
+            border-radius: 15px;
+            cursor: help;
+            transition: all 0.2s ease;
+            font-size: 0.95rem;
+        }
+
+        .word-item:hover {
+            background: #e3e3e3;
+            transform: translateY(-1px);
+        }
+
+        .total-count {
+            color: #666;
+            font-size: 0.9rem;
+            text-align: right;
+            margin-top: 1rem;
+            font-style: italic;
+        }
+
+        .debug-toggle {
+            position: relative;
+            bottom: auto;
+            right: auto;
+            background: #2196F3;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+
+        .debug-toggle:hover {
+            opacity: 1;
+        }
+
+        .debug-canvas {
+            display: none;
+            margin: 20px auto;
+            max-width: 100%;
+            border: 2px solid black;
+        }
+    </style>
+</head>
+
+<body class="{% if site.navbar_fixed %}fixed-top-nav{% endif %} {% unless site.footer_fixed %}sticky-bottom-footer{% endunless %}">
+
+    {% include header.html %}
+
+    <div class="container mt-4">
+
+        {% if page._styles %}
+            <style type="text/css">
+            {{ page._styles }}
+            </style>
+        {% endif %}
+
+        <div class="post">
+            <header class="post-header">
+                <h1 class="post-title">{{ page.title }}</h1>
+                <p class="post-meta">{{ page.date | date: "%B %-d, %Y" }}{% if page.author %} • {{ page.author }}{% endif %}{% if page.meta %} • {{ page.meta }}{% endif %}</p>
+              </header>
+
+            <div class="post-content">
+
+                {{ content }}
+
+                <video id="demoVideo" width="100%" autoplay loop muted>
+                    <source src="/assets/video/demo_wordle.mp4" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+
+                <div class="upload-section">
+                    <label for="imageUpload" class="upload-button">
+                        Upload Wordle Screenshot
+                        <input type="file" id="imageUpload" accept="image/*" style="display: none;">
+                    </label>
+                </div>
+
+                <div class="preview-section" id="previewSection">
+                    <img id="preview" alt="Wordle screenshot preview">
+                    <canvas id="processedImage" style="display: none;"></canvas>
+                    <canvas id="debugCanvas" class="debug-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="debugToggle" class="debug-toggle">Toggle Debug View</button>
+
+    <script>
+        const uploadInput = document.getElementById('imageUpload');
+        const previewImg = document.getElementById('preview');
+        const processedCanvas = document.getElementById('processedImage');
+        const ctx = processedCanvas.getContext('2d');
+        const debugCanvas = document.getElementById('debugCanvas');
+        const debugCtx = debugCanvas.getContext('2d');
+        const debugToggle = document.getElementById('debugToggle');
+        let debugMode = false;
+
+        debugToggle.addEventListener('click', () => {
+            debugMode = !debugMode;
+            debugCanvas.style.display = debugMode ? 'block' : 'none';
+        });
+
+        async function loadWordList() {
+            try {
+                const response = await fetch('/assets/files/words_ranks.txt');
+                const text = await response.text();
+                
+                // Parse lines into [word, rank] pairs and convert to objects
+                return text.split('\n')
+                    .map(line => {
+                        const [word, rank] = line.trim().split(/\s+/);
+                        return {
+                            word: word.toUpperCase(),
+                            rank: parseFloat(rank)
+                        };
+                    })
+                    .filter(item => !isNaN(item.rank)); // Remove any invalid entries
+            } catch (error) {
+                console.error('Error loading word list:', error);
+                return [];
+            }
+        }
+
+        function filterWordsByGrayLetters(wordObjects, grayLetters) {
+            // Convert gray letters to uppercase for consistency
+            const upperGrayLetters = grayLetters.map(letter => letter.toUpperCase());
+            
+            // Filter out words containing any gray letters
+            return wordObjects.filter(({word}) => {
+                return !upperGrayLetters.some(letter => word.includes(letter));
+            });
+        }
+
+        function filterWordsByYellowLetters(wordObjects, yellowLetters) {
+            // Convert yellow letters to uppercase for consistency
+            const upperYellowLetters = yellowLetters.map(letter => letter.toUpperCase());
+            
+            // Filter words that contain ALL yellow letters
+            return wordObjects.filter(({word}) => {
+                return upperYellowLetters.every(letter => word.includes(letter));
+            });
+        }
+
+        async function analyzeWordleKeyboard(img) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+
+            // Setup debug canvas
+            debugCanvas.width = img.width;
+            debugCanvas.height = img.height;
+            debugCtx.drawImage(img, 0, 0);
+            
+            // Style for sampling points
+            debugCtx.lineWidth = 2;
+            debugCtx.strokeStyle = 'red';
+            debugCtx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+
+            // Find keyboard position by detecting key pattern
+            function findKeyboardPosition() {
+                const searchStartY = Math.floor(img.height * 0.5);
+                const imageData = ctx.getImageData(0, searchStartY, img.width, img.height - searchStartY);
+                const data = imageData.data;
+                console.log(data);
+                
+                // Debug visualization arrays
+                const allPoints = [];
+                const patternPoints = [];
+                
+                function getBrightness(x, y) {
+                    const i = (y * img.width + x) * 4;
+                    if (i < 0 || i >= data.length - 3) return 0;
+                    return (data[i] + data[i + 1] + data[i + 2]) / 3;
+                }
+
+                // Find sequences of similar brightness in a row
+                function findSequencesInRow(y) {
+                    const sequences = [];
+                    let currentSequence = {
+                        startX: 0,
+                        brightness: getBrightness(0, y),
+                        length: 1
+                    };
+
+                    for (let x = 1; x < img.width; x++) {
+                        const brightness = getBrightness(x, y);
+                        const diff = Math.abs(brightness - currentSequence.brightness);
+                        
+                        if (diff < 20) { // Similar brightness
+                            currentSequence.length++;
+                        } else { // New sequence
+                            if (currentSequence.length > 10) { // Minimum sequence length
+                                sequences.push({...currentSequence});
+                            }
+                            currentSequence = {
+                                startX: x,
+                                brightness: brightness,
+                                length: 1
+                            };
+                        }
+                    }
+                    
+                    // Add last sequence
+                    if (currentSequence.length > 10) {
+                        sequences.push(currentSequence);
+                    }
+
+                    if (debugMode) {
+                        sequences.forEach((seq, index) => {
+                            // Create a repeating pattern of colors
+                            const colors = ['#FF0000', '#00FF00', '#0000FF', '#FF00FF', '#00FFFF'];
+                            debugCtx.fillStyle = colors[index % colors.length];
+                            
+                            // Draw a rectangle for the sequence
+                            debugCtx.fillRect(
+                                seq.startX,
+                                y + searchStartY - 2,
+                                seq.length,
+                                4
+                            );
+                            
+                            // Add sequence number
+                            debugCtx.font = '12px Arial';
+                            debugCtx.fillText(
+                                `${index + 1}`,
+                                seq.startX + seq.length/2,
+                                y + searchStartY - 8
+                            );
+                        });
+                    }
+
+                    return sequences;
+                }
+
+                // Check if sequences form a keyboard pattern
+                function hasKeyboardPattern(sequences) {
+                    if (sequences.length < 8) return false; // Need at least 8 alternating regions
+                    
+                    // Check for alternating brightness levels
+                    let similarLengthCount = 0;
+                    const sortedLengths = sequences.map(seq => seq.length).sort((a, b) => a - b);
+                    const medianIndex = Math.floor(sortedLengths.length / 2);
+                    const medianLength = sortedLengths.length % 2 === 0 ? (sortedLengths[medianIndex - 1] + sortedLengths[medianIndex]) / 2 : sortedLengths[medianIndex];
+
+                    for (let i = 1; i < sequences.length; i++) {
+                        // Check if this sequence has similar brightness to any adjacent sequence
+                        const diff = Math.abs(sequences[i-1].brightness - sequences[i].brightness);
+                        if (diff < 20) {
+                            return false; // Adjacent sequences should have different brightness
+                        }
+                        
+                        // Check if sequence length is similar to median (keys should be similar width)
+                        if (Math.abs(sequences[i].length - medianLength) <= 20) {
+                            similarLengthCount++;
+                        }
+                    }
+                    
+                    if (similarLengthCount < 8) {
+                        return false; // If less than 8 sequences have similar length, return false
+                    }
+                    return true;
+                }
+
+                let consecutivePatternRows = 0;
+                let patternStartY = -1;
+
+                // Scan each row
+                for (let y = 0; y < imageData.height; y++) {
+                    const sequences = findSequencesInRow(y);
+                    const isKeyboardRow = hasKeyboardPattern(sequences);
+
+                    if (isKeyboardRow) {
+                        if (patternStartY === -1) {
+                            patternStartY = y + searchStartY;
+                        }
+                        consecutivePatternRows++;
+                        
+                        if (debugMode) {
+                            sequences.forEach(seq => {
+                                patternPoints.push({
+                                    x: seq.startX + seq.length/2,
+                                    y: y + searchStartY,
+                                    width: seq.length
+                                });
+                            });
+                        }
+                    } else {
+                        consecutivePatternRows = 0;
+                        patternStartY = -1;
+                    }
+
+                    if (consecutivePatternRows >= 5) break;
+                }
+
+                // Debug visualization
+                if (debugMode) {
+                    // Show all sequences
+                    allPoints.forEach(point => {
+                        debugCtx.fillStyle = `rgb(${point.brightness},${point.brightness},${point.brightness})`;
+                        debugCtx.fillRect(point.x, point.y, 1, 1);
+                    });
+
+                    // Highlight detected patterns
+                    patternPoints.forEach(point => {
+                        debugCtx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                        debugCtx.fillRect(point.x - point.width/2, point.y, point.width, 1);
+                    });
+                }
+
+                if (patternStartY === -1 || consecutivePatternRows < 5) {
+                    throw new Error('Could not detect keyboard pattern');
+                }
+
+                return {
+                    startY: patternStartY,
+                    height: Math.floor(img.height * 0.25)
+                };
+            }
+
+            // Get keyboard position using pattern detection
+            const { startY: keyboardStartY, height: keyboardHeight } = findKeyboardPosition();
+
+            // Adjust row heights within the keyboard area
+            const rowHeights = [0.15, 0.45, 0.75];
+
+            // Get keyboard area image data
+            const imageData = ctx.getImageData(0, keyboardStartY, img.width, keyboardHeight);
+            const data = imageData.data;
+
+            // Color thresholds for detection
+            const colorThresholds = {
+                dark: {
+                    background: { r: 18, g: 18, b: 19 },
+                    gray: { r: 45, g: 45, b: 45 },
+                    yellow: { r: 170, g: 145, b: 60 },
+                    green: { r: 50, g: 130, b: 50 }
+                },
+                light: {
+                    background: { r: 255, g: 255, b: 255 },
+                    gray: { r: 110, g: 125, b: 120 },
+                    yellow: { r: 195, g: 165, b: 55 },
+                    green: { r: 70, g: 160, b: 75 }
+                }
+            };
+
+            // Store detected colored keys
+            const coloredKeys = {
+                gray: [],
+                yellow: [],
+                green: []
+            };
+
+            function detectColorScheme() {
+                const totalPixels = img.width * img.height;
+                const data = ctx.getImageData(0, 0, img.width, img.height).data;
+                let sum = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    sum += data[i];
+                }
+                const average = Math.floor(sum / totalPixels);
+                
+                return average < 100 ? 'dark' : 'light';
+            }
+            
+            // Get the active color scheme
+            const activeScheme = detectColorScheme();
+            console.log("Detected color scheme: ", activeScheme);
+            const activeThresholds = colorThresholds[activeScheme];
+
+            function getColorAtPoint(x, y) {
+                // Adjust y to be relative to the cropped area
+                const localY = y - keyboardStartY;
+                // Use the width of the cropped area (same as full width in this case)
+                const index = (localY * img.width + x) * 4;
+                
+                // Add bounds checking
+                if (index < 0 || index >= data.length - 3) {
+                    return { r: 0, g: 0, b: 0 };
+                }
+                
+                return {
+                    r: data[index],
+                    g: data[index + 1],
+                    b: data[index + 2]
+                };
+            }
+
+            function matchesColor(color, threshold) {
+                // Check if color matches threshold within tolerance
+                const tolerance = 50;
+                return Math.abs(color.r - threshold.r) < tolerance &&
+                       Math.abs(color.g - threshold.g) < tolerance &&
+                       Math.abs(color.b - threshold.b) < tolerance;
+            }
+
+            function drawSamplingPoint(x, y, letter) {
+                const radius = 5;
+                debugCtx.beginPath();
+                debugCtx.arc(x, y, radius, 0, 2 * Math.PI);
+                debugCtx.fill();
+                debugCtx.stroke();
+                
+                // Draw letter label
+                debugCtx.fillStyle = 'white';
+                debugCtx.strokeStyle = 'black';
+                debugCtx.font = '12px Arial';
+                debugCtx.textAlign = 'center';
+                debugCtx.textBaseline = 'middle';
+                debugCtx.strokeText(letter, x, y - 15);
+                debugCtx.fillText(letter, x, y - 15);
+                debugCtx.fillStyle = 'rgba(255, 0, 0, 0.5)'; // Reset fill style for next point
+            }
+
+            // Key positions (approximate relative to keyboard width)
+            const keyboardLayout = [
+                ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+                ['ENTER', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '⌫']
+            ];
+
+            // Calculate widths based on the top row (10 keys)
+            const keyboardWidth = Math.floor(img.width * 0.97);
+            const standardKeyWidth = keyboardWidth / 10; // Width based on top row's 10 keys
+            const keyboardLeftOffset = Math.floor((img.width - keyboardWidth) / 2); // Center the keyboard horizontally
+
+            // Modify the row processing to handle different widths
+            keyboardLayout.forEach((row, rowIndex) => {
+                // Calculate offset and key width based on row
+                let currentKeyWidth;
+                let rowOffset;
+                
+                if (rowIndex === 0) {
+                    // Top row 10 keys, no offset
+                    currentKeyWidth = standardKeyWidth;
+                    rowOffset = 0;
+                } else {
+                    // Middle and bottom rows: 9 keys, centered
+                    currentKeyWidth = (keyboardWidth * 0.9) / 9; // Slightly smaller width for 9 keys
+                    rowOffset = (keyboardWidth - (currentKeyWidth * 9)) / 2;
+                }
+                
+                row.forEach((letter, keyIndex) => {
+                    const x = Math.floor(
+                        keyboardLeftOffset + 
+                        rowOffset + 
+                        (keyIndex * currentKeyWidth) + 
+                        (currentKeyWidth / 2)
+                    );
+                    
+                    // Calculate the base y position
+                    const baseY = Math.floor(keyboardStartY + (keyboardHeight * rowHeights[rowIndex]));
+                    
+                    // Move sampling point up by 25% of the key height (estimated as keyboardHeight/3)
+                    const keyHeight = keyboardHeight / 3;
+                    const sampleOffsetY = keyHeight * 0.25;
+                    const y = Math.floor(baseY - sampleOffsetY);
+                    
+                    // Draw sampling point
+                    drawSamplingPoint(x, y, letter);
+                    
+                    const color = getColorAtPoint(x, y);
+                    // Debug coordinates
+                    console.log(`Sampling ${letter}:`, {
+                        color,
+                    });
+
+                    // Check which color threshold it matches
+                    if (matchesColor(color, activeThresholds.gray)) {
+                        coloredKeys.gray.push(letter);
+                    } else if (matchesColor(color, activeThresholds.yellow)) {
+                        coloredKeys.yellow.push(letter);
+                    } else if (matchesColor(color, activeThresholds.green)) {
+                        coloredKeys.green.push(letter);
+                    }
+                });
+            });
+
+            // Update debug visualization
+            if (debugMode) {
+                // Add debug visualization for keyboard area
+                debugCtx.strokeStyle = 'blue';
+                debugCtx.lineWidth = 2;
+                debugCtx.strokeRect(0, keyboardStartY, img.width, keyboardHeight);
+
+                // Add debug visualization for keyboard width
+                debugCtx.strokeStyle = 'green';
+                debugCtx.strokeRect(
+                    keyboardLeftOffset, 
+                    keyboardStartY, 
+                    keyboardWidth, 
+                    keyboardHeight
+                );
+            }
+
+            return coloredKeys;
+        }
+
+        uploadInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const previewSection = document.getElementById('previewSection');
+                const previewImg = document.getElementById('preview');
+                
+                previewSection.style.display = 'block';
+                previewImg.src = e.target.result;
+
+                const img = new Image();
+                img.onload = async function() {
+                    try {
+                        debugCanvas.style.display = debugMode ? 'block' : 'none';
+                        const coloredKeys = await analyzeWordleKeyboard(img);
+                        await displayResults(coloredKeys);
+                    } catch (error) {
+                        console.error('Error analyzing keyboard:', error);
+                        alert('Error detecting keyboard position. Please try a different screenshot.');
+                    }
+                };
+                img.src = e.target.result;
+            };
+
+            reader.readAsDataURL(file);
+        });
+
+        async function displayResults(coloredKeys) {
+            // Load word list
+            const wordObjects = await loadWordList();
+            
+            // Filter words by gray letters first (removes impossible words)
+            const wordsWithoutGray = filterWordsByGrayLetters(wordObjects, coloredKeys.gray);
+            
+            // From remaining words, get two sets:
+            // 1. Top 20 most common words that don't contain gray letters
+            const topWordsNoGray = wordsWithoutGray
+                .sort((a, b) => a.rank - b.rank)
+                .slice(0, 20);
+            
+            // 2. Top 20 most common words that contain all yellow letters
+            const wordsWithYellow = filterWordsByYellowLetters(wordsWithoutGray, coloredKeys.yellow);
+            const topWordsWithYellow = wordsWithYellow
+                .sort((a, b) => a.rank - b.rank)
+                .slice(0, 20);
+            
+            // Create or get results container
+            let resultsDiv = document.getElementById('wordleResults');
+            if (!resultsDiv) {
+                resultsDiv = document.createElement('div');
+                resultsDiv.id = 'wordleResults';
+                document.body.appendChild(resultsDiv);
+            }
+
+            // Display results
+            resultsDiv.innerHTML = `
+                <div class="results-section">
+                    <h2>Analysis Results</h2>
+                    
+                    <div class="detected-keys">
+                        <div class="key-category">
+                            <h3>Gray Keys</h3>
+                            <p style="color: gray">${coloredKeys.gray.join(' ')}</p>
+                        </div>
+                        <div class="key-category">
+                            <h3>Yellow Keys</h3>
+                            <p style="color: #c9b458">${coloredKeys.yellow.join(' ')}</p>
+                        </div>
+                        <div class="key-category">
+                            <h3>Green Keys</h3>
+                            <p style="color: #6aaa64">${coloredKeys.green.join(' ')}</p>
+                        </div>
+                    </div>
+
+                    <div class="word-results">
+                        <div class="word-list">
+                            <h3>Top Words (No Gray Letters)</h3>
+                            <div>
+                                ${topWordsNoGray.map(({word, rank}) => 
+                                    `<span class="word-item" title="Rank: ${rank}">${word}</span>`
+                                ).join('')}
+                            </div>
+                            <p class="total-count">Total possible words: ${wordsWithoutGray.length}</p>
+                        </div>
+
+                        <div class="word-list">
+                            <h3>Top Words (With Yellow Letters)</h3>
+                            <div>
+                                ${topWordsWithYellow.map(({word, rank}) => 
+                                    `<span class="word-item" title="Rank: ${rank}">${word}</span>`
+                                ).join('')}
+                            </div>
+                            <p class="total-count">Total words with yellow letters: ${wordsWithYellow.length}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+
+{% include scripts/bootstrap.html %}
+{% include scripts/mansory.html %}
+{% include scripts/misc.html %}
+
+</html>

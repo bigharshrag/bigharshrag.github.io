@@ -62,13 +62,13 @@ google_analytics: G-77Y4XCB19M # out your google-analytics code
 # Blog
 # -----------------------------------------------------------------------------
 
-# blog_name: al-folio  # your blog must have a name for it to show up in the nav bar
+blog_name: SomeName  # your blog must have a name for it to show up in the nav bar
 # blog_description: a simple whitespace theme for academics
-# permalink: /blog/:year/:title/
+permalink: /blog/:year/:title/
 
-# # Pagination
-# pagination:
-#   enabled: true
+# Pagination
+pagination:
+  enabled: true
 
 # # Comments
 # disqus_shortname: # put your disqus shortname
