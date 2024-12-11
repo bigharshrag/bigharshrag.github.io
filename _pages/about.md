@@ -21,4 +21,4 @@ Before joining UT, I completed my undergrad in Computer Science and Engineering 
 
 I also have spent summers interning at Amazon during my masters, and at Goldman Sachs, and CCExtractor for the [Google Summer of Code](https://summerofcode.withgoogle.com/archive/2016/projects/5348332989841408/) during my undergrad.
 
-**[CV](assets/pdf/Resume.pdf) \| [E-Mail](mailto:rishabh@cs.utexas.edu) \| [Google Scholar](https://scholar.google.com/citations?user=mnEnXDkAAAAJ&hl=en)   \| [LinkedIn](https://www.linkedin.com/in/rishabhgr/) \| [Github](https://github.com/bigharshrag)**
+**[CV](assets/pdf/Resume.pdf) \| [E-Mail](mailto:garg.rishabh22@gmail.com) \| [Google Scholar](https://scholar.google.com/citations?user=mnEnXDkAAAAJ&hl=en)   \| [LinkedIn](https://www.linkedin.com/in/rishabhgr/) \| [Github](https://github.com/bigharshrag)**
