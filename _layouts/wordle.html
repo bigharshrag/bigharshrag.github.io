@@ -242,13 +242,13 @@
             }
         }
 
-        function filterWordsByGrayLetters(wordObjects, grayLetters) {
+        function filterWordsByColorLetters(wordObjects, colorLetters) {
             // Convert gray letters to uppercase for consistency
-            const upperGrayLetters = grayLetters.map(letter => letter.toUpperCase());
+            const upperColorLetters = colorLetters.map(letter => letter.toUpperCase());
             
             // Filter out words containing any gray letters
             return wordObjects.filter(({word}) => {
-                return !upperGrayLetters.some(letter => word.includes(letter));
+                return !upperColorLetters.some(letter => word.includes(letter));
             });
         }
 
@@ -652,11 +652,13 @@
             const wordObjects = await loadWordList();
             
             // Filter words by gray letters first (removes impossible words)
-            const wordsWithoutGray = filterWordsByGrayLetters(wordObjects, coloredKeys.gray);
+            const wordsWithoutGray = filterWordsByColorLetters(wordObjects, coloredKeys.gray);
+            const wordsWithoutGrayGreen = filterWordsByColorLetters(wordsWithoutGray, coloredKeys.green);
+            const wordsWithoutGrayGreenYellow = filterWordsByColorLetters(wordsWithoutGrayGreen, coloredKeys.yellow);
             
             // From remaining words, get two sets:
-            // 1. Top 20 most common words that don't contain gray letters
-            const topWordsNoGray = wordsWithoutGray
+            // 1. Top 20 most common words that don't contain colored letters
+            const topWordsNoColor = wordsWithoutGrayGreenYellow
                 .sort((a, b) => a.rank - b.rank)
                 .slice(0, 20);
             
@@ -696,13 +698,13 @@
 
                     <div class="word-results">
                         <div class="word-list">
-                            <h3>Top Words (No Gray Letters)</h3>
+                            <h3>Top Words (No Gray/Green/Yellow Letters)</h3>
                             <div>
-                                ${topWordsNoGray.map(({word, rank}) => 
+                                ${topWordsNoColor.map(({word, rank}) => 
                                     `<span class="word-item" title="Rank: ${rank}">${word}</span>`
                                 ).join('')}
                             </div>
-                            <p class="total-count">Total possible words: ${wordsWithoutGray.length}</p>
+                            <p class="total-count">Total possible words: ${wordsWithoutGrayGreenYellow.length}</p>
                         </div>
 
                         <div class="word-list">
