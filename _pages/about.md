@@ -6,7 +6,7 @@ permalink: /
 
 profile:
   align: right
-  image: prof_img.jpeg
+  image: IMG_1815.jpg
   # address: >
     # <p>rishabh [at] cs [dot] utexas [dot] edu</p>
 
