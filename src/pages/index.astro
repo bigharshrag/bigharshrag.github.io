@@ -1,0 +1,44 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Publications from '../components/Publications.astro';
+---
+
+<BaseLayout title="Rishabh Garg">
+  <div class="post">
+    <header class="post-header">
+      <h1 class="post-title">
+        <span class="font-weight-bold">Rishabh</span> Garg
+      </h1>
+    </header>
+
+    <article>
+      <div class="profile float-right">
+        <img class="img-fluid z-depth-1 rounded" src="/assets/img/IMG_1815.jpg" alt="Rishabh Garg" />
+      </div>
+
+      <div class="clearfix">
+        <p>
+          I currently work at Amazon Web Services as a Software Engineer. Prior to this, I completed my Masters in Computer Science from The University of Texas at Austin where I worked with <a href="https://www.cs.utexas.edu/~grauman/">Prof. Kristen Grauman</a> on Audio-Visual Learning from Videos as a part of my masters thesis. Broadly, my research interests are in the area of computer vision and my most recent research was on generating better binaural audio from videos.
+        </p>
+
+        <p>
+          Before joining UT, I completed my undergrad in Computer Science and Engineering from <a href="https://www.iiitd.ac.in/">IIIT-Delhi</a>. For my undergraduate thesis, I worked at the <a href="http://www.iab-rubric.org/">Image Analysis and Biometrics Lab</a> at IIITD jointly advised by <a href="http://home.iitj.ac.in/~mvatsa/">Dr. Mayank Vatsa</a> and <a href="http://home.iitj.ac.in/~richa/">Dr. Richa Singh</a>.
+        </p>
+
+        <p>
+          I also have spent summers interning at Amazon during my masters, and at Goldman Sachs, and CCExtractor for the <a href="https://summerofcode.withgoogle.com/archive/2016/projects/5348332989841408/">Google Summer of Code</a> during my undergrad.
+        </p>
+
+        <p class="social-links">
+          <a href="/assets/pdf/Resume.pdf"><u>CV</u></a> |
+          <a href="mailto:garg.rishabh22@gmail.com"><u>E-Mail</u></a> |
+          <a href="https://scholar.google.com/citations?user=mnEnXDkAAAAJ&hl=en"><u>Google Scholar</u></a> |
+          <a href="https://www.linkedin.com/in/rishabhgr/"><u>LinkedIn</u></a> |
+          <a href="https://github.com/bigharshrag"><u>Github</u></a>
+        </p>
+      </div>
+
+      <Publications />
+    </article>
+  </div>
+</BaseLayout>

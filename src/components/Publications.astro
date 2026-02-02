@@ -1,0 +1,80 @@
+---
+interface Publication {
+  title: string;
+  firstAuthor: string;
+  otherAuthors: string;
+  venue: string;
+  year: number;
+  logo: string;
+  pdf?: string;
+  html?: string;
+  website?: string;
+  track?: string;
+  award?: string;
+}
+
+const publications: Publication[] = [
+  {
+    title: "Visually-Guided Audio Spatialization in Video with Geometry-Aware Multi-task Learning",
+    firstAuthor: "Rishabh Garg",
+    otherAuthors: "Ruohan Gao, and Kristen Grauman",
+    venue: "International Journal of Computer Vision (IJCV)",
+    year: 2023,
+    logo: "/assets/img/ijcv2023.png",
+    pdf: "https://link.springer.com/article/10.1007/s11263-023-01816-8"
+  },
+  {
+    title: "Geometry-Aware Multi-Task Learning for Binaural Audio Generation from Video",
+    firstAuthor: "Rishabh Garg",
+    otherAuthors: "Ruohan Gao, and Kristen Grauman",
+    venue: "British Machine Vision Conference (BMVC)",
+    year: 2021,
+    logo: "/assets/img/bmvc2021.png",
+    track: "Oral Presentation",
+    award: "Best Paper Award Runner Up",
+    pdf: "https://arxiv.org/pdf/2111.10882.pdf",
+    website: "https://vision.cs.utexas.edu/projects/geometry-aware-binaural/"
+  },
+  {
+    title: "Heterogeneity Aware Deep Embedding for Mobile Periocular Recognition",
+    firstAuthor: "Rishabh Garg",
+    otherAuthors: "Yashasvi Baweja, Soumyadeep Ghosh, Richa Singh, Mayank Vatsa, and Nalini Ratha",
+    venue: "2018 IEEE 9th International Conference on Biometrics Theory, Applications and Systems (BTAS)",
+    year: 2018,
+    logo: "/assets/img/btas2019.png",
+    pdf: "https://arxiv.org/pdf/1811.00846.pdf",
+    html: "https://ieeexplore.ieee.org/abstract/document/8698551"
+  }
+];
+---
+
+<div class="publications">
+  <h2><span>publications</span></h2>
+
+  {publications.map((pub) => (
+    <div class="publication-item">
+      <img src={pub.logo} alt="" class="publication-logo" />
+      <div class="publication-content">
+        <span class="title">{pub.title}</span>
+        <br />
+        <span class="author">
+          <strong>{pub.firstAuthor}</strong>, {pub.otherAuthors}
+        </span>
+        <br />
+        <em>In {pub.venue},</em> {pub.year}
+        {(pub.track || pub.award) && (
+          <>
+            <br />
+            {pub.track && <span>({pub.track}) </span>}
+            {pub.award && <span>[<a href="#">{pub.award}</a>]</span>}
+          </>
+        )}
+        <div class="links">
+          {pub.pdf && <a class="btn btn-sm z-depth-0" href={pub.pdf} target="_blank" rel="noopener">PDF</a>}
+          {pub.html && <a class="btn btn-sm z-depth-0" href={pub.html} target="_blank" rel="noopener">HTML</a>}
+          {pub.website && <a class="btn btn-sm z-depth-0" href={pub.website} target="_blank" rel="noopener">WEBSITE</a>}
+        </div>
+      </div>
+    </div>
+  ))}
+</div>
