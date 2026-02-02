@@ -1,0 +1,33 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+interface BlogPost {
+  title: string;
+  date: string;
+  description: string;
+  url: string;
+}
+
+const posts: BlogPost[] = [
+  {
+    title: "Get unstuck at Wordle",
+    date: "December 8, 2024",
+    description: "Quick utility to give some suggestions based on a screenshot",
+    url: "/blog/2024/wordle-helper/"
+  }
+];
+---
+
+<BaseLayout title="Blog - Rishabh Garg">
+  <ul class="post-list">
+    {posts.map((post) => (
+      <li>
+        <span class="post-meta">{post.date}</span>
+        <h3>
+          <a href={post.url}>{post.title}</a>
+        </h3>
+        <p>{post.description}</p>
+      </li>
+    ))}
+  </ul>
+</BaseLayout>

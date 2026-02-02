@@ -1,9 +1,38 @@
-_site
+# Build output
+dist/
+_site/
+
+# Dependencies
+node_modules/
 .bundle
+vendor
+
+# Caches
 .sass-cache
 .jekyll-metadata
-.DS_store
-.ruby-version
 .tweet-cache/
+.astro/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.production
+
+# macOS
+.DS_Store
+.DS_store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ruby
+.ruby-version
 Gemfile.lock
-vendor
+CityExplorer/
