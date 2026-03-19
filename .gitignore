@@ -36,3 +36,6 @@ yarn-error.log*
 .ruby-version
 Gemfile.lock
 CityExplorer/
+
+# Worktrees
+.worktrees/
