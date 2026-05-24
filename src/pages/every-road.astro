@@ -464,12 +464,21 @@ const title = "I Mapped Every Road I've Been On in Seattle";
   #cityEdgesGroup .visited.hw-3 { stroke-width: 1.3; }
   #cityEdgesGroup .visited.hw-r { stroke-width: 0.9; }
 
+  /* Roads "light up" as the timeline reveals them. Per-path class instead
+     of parent-class toggle: invalidating 84k descendants on every bucket
+     transition caused 250ms style recalcs on mobile. */
+  #cityEdgesGroup .lit,
+  #stateEdgesGroup .lit {
+    stroke: var(--road-highlight);
+    stroke-opacity: 0.9;
+  }
+
   /* During zoom-out, suppress visited-road highlights so the crossfade reads
      as a neutral road network instead of a bright orange blob. Also reset
      the state-visited stroke-width so the fat orange treatment doesn't pop
      in mid-transition. */
-  #cityEdgesGroup.zoom-transition .visited,
-  #stateEdgesGroup.zoom-transition .visited {
+  #cityEdgesGroup.zoom-transition .lit,
+  #stateEdgesGroup.zoom-transition .lit {
     stroke: var(--road-base);
     stroke-opacity: 0.5;
   }
@@ -613,6 +622,8 @@ const title = "I Mapped Every Road I've Been On in Seattle";
   var loadedCount = 0;
   var cityLastBucket = -1;
   var stateLastBucket = -1;
+  var cityBucketPaths = null;
+  var stateBucketPaths = null;
   var ticking = false;
 
   // Computed viewBox arrays: [x, y, width, height]
@@ -706,18 +717,6 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     return { s: s, tx: tx, ty: ty };
   }
 
-  // --- Generate CSS bucket rules for a given group element ---
-  function generateBucketCSS(groupId, count) {
-    var highlightColor = getComputedStyle(document.documentElement).getPropertyValue('--road-highlight').trim();
-    var css = '';
-    for (var i = 0; i < count; i++) {
-      css += '#' + groupId + '.b' + i + ' .bucket-' + i + '{stroke:' + highlightColor + ';stroke-opacity:0.9}\n';
-    }
-    var style = document.createElement('style');
-    style.textContent = css;
-    document.head.appendChild(style);
-  }
-
   // --- Render water paths into a group element ---
   function renderWater(groupEl, paths) {
     var fragment = document.createDocumentFragment();
@@ -729,10 +728,16 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     groupEl.appendChild(fragment);
   }
 
-  // --- Render edges into a group element ---
+  // --- Render edges into a group element. Returns an array indexed by
+  // bucket number containing the path elements in that bucket — used by
+  // updateBuckets to light up paths incrementally without re-querying the
+  // DOM. ---
   function renderEdges(groupId, data) {
     var group = document.getElementById(groupId);
     group.innerHTML = '';
+
+    var bucketPaths = [];
+    for (var k = 0; k < data.bucketCount; k++) bucketPaths.push([]);
 
     var fragment = document.createDocumentFragment();
     for (var j = 0; j < data.edges.length; j++) {
@@ -742,23 +747,30 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       path.classList.add('hw-' + edge.t);
 
       if (edge.b >= 0) {
-        path.classList.add('visited', 'bucket-' + edge.b);
+        path.classList.add('visited');
+        bucketPaths[edge.b].push(path);
       }
 
       fragment.appendChild(path);
     }
     group.appendChild(fragment);
+    return bucketPaths;
   }
 
-  // --- Update bucket classes on a group element ---
-  function updateBuckets(groupEl, lastBucket, newBucket) {
+  // --- Add/remove the .lit class on paths between buckets. Touching each
+  // affected path directly (instead of toggling a parent class) keeps the
+  // browser's style invalidation scoped to ~thousands of leaf paths
+  // instead of all 84k descendants. ---
+  function updateBuckets(bucketPaths, lastBucket, newBucket) {
     if (newBucket > lastBucket) {
       for (var i = lastBucket + 1; i <= newBucket; i++) {
-        groupEl.classList.add('b' + i);
+        var paths = bucketPaths[i];
+        for (var j = 0; j < paths.length; j++) paths[j].classList.add('lit');
       }
     } else if (newBucket < lastBucket) {
       for (var i = lastBucket; i > newBucket; i--) {
-        groupEl.classList.remove('b' + i);
+        var paths = bucketPaths[i];
+        for (var j = 0; j < paths.length; j++) paths[j].classList.remove('lit');
       }
     }
   }
@@ -933,7 +945,7 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       );
 
       if (bucket !== cityLastBucket) {
-        updateBuckets(cityEdgesGroup, cityLastBucket, bucket);
+        updateBuckets(cityBucketPaths, cityLastBucket, bucket);
         cityLastBucket = bucket;
       }
 
@@ -1010,7 +1022,7 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       );
 
       if (bucket !== stateLastBucket) {
-        updateBuckets(stateEdgesGroup, stateLastBucket, bucket);
+        updateBuckets(stateBucketPaths, stateLastBucket, bucket);
         stateLastBucket = bucket;
       }
 
@@ -1179,9 +1191,23 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       loadingMsg.classList.add('hidden');
       buildTimeline();
       setupTimelineInteraction();
+      updateAspectRatio();
       window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', updateAspectRatio);
       onScroll();
     }
+  }
+
+  // The map data has aspect ratio ~1.89 (wider than tall). On wide
+  // viewports (desktop, phone in landscape) slice fills the viewport
+  // edge-to-edge with a tiny side crop. On narrow viewports (phone in
+  // portrait, tablet portrait) slice would crop ~70% of the map; switch
+  // to meet so the full map shows with top/bottom letterbox bars
+  // (which match the page bg, so they read as natural padding).
+  function updateAspectRatio() {
+    var aspect = window.innerWidth / window.innerHeight;
+    var mode = aspect < 1.0 ? 'meet' : 'slice';
+    mapSvg.setAttribute('preserveAspectRatio', 'xMidYMid ' + mode);
   }
 
   // --- Init ---
@@ -1201,15 +1227,13 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       var stateWaterData = responses[3].ok ? await responses[3].json() : null;
 
       cityData = await responses[0].json();
-      generateBucketCSS('cityEdgesGroup', cityData.bucketCount);
       if (cityWaterData) renderWater(cityWaterGroup, cityWaterData.paths);
-      renderEdges('cityEdgesGroup', cityData);
+      cityBucketPaths = renderEdges('cityEdgesGroup', cityData);
       onMapLoaded();
 
       stateData = await responses[1].json();
-      generateBucketCSS('stateEdgesGroup', stateData.bucketCount);
       if (stateWaterData) renderWater(stateWaterGroup, stateWaterData.paths);
-      renderEdges('stateEdgesGroup', stateData);
+      stateBucketPaths = renderEdges('stateEdgesGroup', stateData);
       onMapLoaded();
 
     } catch (error) {
