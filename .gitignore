@@ -39,3 +39,7 @@ CityExplorer/
 
 # Worktrees
 .worktrees/
+
+cache/
+
+.claude/

@@ -1,0 +1,1222 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const title = "I Mapped Every Road I've Been On in Seattle";
+---
+
+<BaseLayout title={title} description="I Mapped Every Road I've Been On in Seattle">
+  <!-- Intro section -->
+  <section class="explorer-prose explorer-intro">
+    <div class="prose-container">
+      <h1 class="explorer-title">I Mapped Every Road I've Been On in Seattle</h1>
+      <p>
+        After living in Seattle for more than a couple of years, I ended up going to the Arboretum on a random Thursday. I had driven by it several dozen times, seen it on maps, and probably mentioned it in conversations, but I had not really been there. When I finally went, it made me wonder: how much of Seattle had I actually seen?
+      </p>
+      <p>
+        Not whether I had done the standard Seattle things, or how many restaurants I had tried. I mean more literally: which streets had I actually been on? Cities can trick you this way because you know your grocery store, the fastest way home, and the annoying intersection to avoid, but your life in a city is not evenly distributed.
+      </p>
+      <p>
+        I am, unfortunately, a sucker for nostalgia. So despite the obvious privacy horror of it all, I have Google Location History turned on. It is invasive and occasionally unsettling, but it is also a strangely vivid way to revisit the past and the Timeline data is perfectly suited to reconstruct my exploration of Seattle over time. 
+      </p>  
+      <p>  
+        The result is heavily biased toward places I drove, because that is when GPS was most consistently active. 
+      </p>
+      <p>  
+        As you scroll below, the city slowly fills in as part map and part personal diary.
+      </p>
+      <p class="scroll-hint">Scroll to begin &darr;</p>
+    </div>
+  </section>
+
+  <!-- Map scroll section -->
+  <div class="scroll-container" id="scrollContainer">
+    <div class="map-viewport">
+      <svg id="mapSvg" class="map-layer" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <!-- Right-edge fade mask: state edges fade to invisible in the
+               last ~12% of viewBox width so roads end naturally at the
+               eastern bbox instead of slicing off mid-screen. -->
+          <linearGradient id="rightEdgeFadeGrad" x1="0" x2="4450" y1="0" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="white" />
+            <stop offset="0.88" stop-color="white" />
+            <stop offset="1" stop-color="black" />
+          </linearGradient>
+          <mask id="stateEdgeFadeMask">
+            <rect x="0" y="0" width="4450" height="3450" fill="url(#rightEdgeFadeGrad)" />
+          </mask>
+
+          <!-- Mask for the terrain raster: full visibility through ~85% of
+               the data extent, fades to invisible in the last 15% so the
+               hillshade rectangle's hard edges blend into the bg. Uses
+               userSpaceOnUse coords matching the image position. -->
+          <radialGradient id="mtnFadeGrad" cx="2225" cy="1725" r="2500" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="white" />
+            <stop offset="0.82" stop-color="white" />
+            <stop offset="1" stop-color="black" />
+          </radialGradient>
+          <mask id="mtnFadeMask" maskUnits="userSpaceOnUse" x="40" y="571" width="4370" height="2308">
+            <rect x="40" y="571" width="4370" height="2308" fill="url(#mtnFadeGrad)" />
+          </mask>
+        </defs>
+        <rect width="100%" height="100%" />
+        <g id="stateTerrainGroup" style="display:none">
+          <!-- Shaded relief raster from ESRI World Hillshade, positioned to
+               match the state geographic extent. Geographic bounds
+               (-124.8,46.6 to -120.35,48.95) map to the data area in the
+               state viewBox: (40, 571) to (4410, 2879). -->
+          <image href="/assets/data/state-hillshade.jpg" x="40" y="571" width="4370" height="2308" preserveAspectRatio="none" />
+        </g>
+        <g id="stateWaterGroup"></g>
+        <g id="stateEdgesGroup" mask="url(#stateEdgeFadeMask)"></g>
+        <g id="cityWaterGroup"></g>
+        <g id="cityEdgesGroup"></g>
+        <g id="cityLabelsGroup"></g>
+
+        <!-- State-zoom labels: Seattle (city anchor), Olympic NP,
+             Mt. Rainier NP, Cascades range. Coordinates computed from
+             lng/lat using the same transform the road data uses.
+             Hidden during city phases via the JS phase logic. -->
+        <g id="stateLabelsGroup" style="display:none">
+          <text x="2465" y="1898" class="state-label state-label-city">Seattle</text>
+          <text x="1218" y="1651" class="state-label state-label-park" text-anchor="middle">
+            <tspan x="1218" dy="0">Olympic</tspan>
+            <tspan x="1218" dy="44">National Park</tspan>
+          </text>
+          <text x="3026" y="2520" class="state-label state-label-park" text-anchor="middle">
+            <tspan x="3026" dy="0">Mt. Rainier</tspan>
+            <tspan x="3026" dy="44">National Park</tspan>
+          </text>
+        </g>
+      </svg>
+      <div class="timeline-sidebar" id="timelineSidebar">
+        <div class="timeline-track" id="timelineTrack">
+          <div class="timeline-indicator" id="timelineIndicator">
+            <span class="timeline-date-label" id="timelineDateLabel"></span>
+            <span class="timeline-indicator-line"></span>
+          </div>
+        </div>
+      </div>
+      <div class="loading-msg" id="loadingMsg">Loading road network...</div>
+    </div>
+    <div class="scroll-spacer"></div>
+  </div>
+
+  <!-- Outro section -->
+  <section class="explorer-prose explorer-outro">
+    <div class="prose-container">
+      <h2>How I made this</h2>
+      <p>
+        Google Timeline logs your location pretty frequently and for me that's something like 1.8 million GPS pings across several years. 
+      </p>
+      <p>
+        Plotting them raw is unreadable; what you want is each ping snapped to an actual road. So I pulled the road network of every drivable street from OpenStreetMap (~80,000+ edges), and Washington's highways for the state view (~20,000+ edges). 
+        I mapped each GPS ping to its nearest road to get the edges I directly drove on (40%<span class="reference-note" tabindex="0" aria-label="The rest is dominated by tiny edges of tertiary roads">[1]<span class="reference-note-content" role="tooltip">The rest is dominated by tiny edges of tertiary roads</span></span> of the map).
+      </p>
+      <p>
+        The interesting trick is filling in the gaps. GPS sampling is irregular: sometimes my phone drops a ping every minute, sometimes every fifteen. On a long highway drive, that can leave miles of dark road between two lit points even though I obviously drove it. So for every pair of consecutive pings, I lit up the shortest route between consecutive if they happened within a few minutes of each other.
+      </p>
+      <p>
+        For the animation, I tag every visited edge with the date I first drove it, sort the whole thing chronologically, and chop it into equal-count buckets rather than equal slices of time. The scrubber walks through "the next slice of map that lit up" rather than equal slices of time or else the whole thing would be dominated by my commute to work.
+      </p>
+    </div>
+  </section>
+</BaseLayout>
+
+<style is:global>
+  /* Candidate fonts for the state-zoom labels — referenced via --label-font */
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500&family=Spectral:ital,wght@0,300;0,500;1,300&display=swap');
+
+  /* ============================================================
+     PALETTE CONFIG — swap palettes by changing :root variables.
+     To switch: comment out the active palette, uncomment another.
+     ============================================================ */
+
+  /* Parchment Atlas — off-white page, sepia roads, dusty blue water.
+     Matches the prose-section bg so map + text feel continuous. */
+  :root {
+    --map-bg: #F2EBDD;                          /* matches .explorer-prose bg */
+    --road-base: #B8A38A;                       /* muted sepia — recedes against bg */
+    --road-highlight: #1F1208;                  /* black ink — letterpress contrast vs muted base */
+    --text-primary: #2A2218;                    /* deep warm black */
+    --text-secondary: rgba(60, 50, 38, 0.55);   /* muted sepia */
+    --water-fill: #B6CFE0;                      /* dusty blue */
+    --water-stroke: #88A4B8;                    /* deeper blue */
+    --terrain-tint: #8A7B68;                    /* warm grey-brown */
+    --label-halo: rgba(242, 235, 221, 0.85);    /* parchment-colored stroke halo */
+    --label-font: 'Inter', system-ui, sans-serif;
+  }
+
+  /* Ink & Teal — cool mist, dark slate grid, vivid teal traces
+  :root {
+    --map-bg: #F0F4F8;
+    --road-base: #3D4F5F;
+    --road-highlight: #0D9488;
+    --text-primary: #334155;
+    --text-secondary: #94A3B8;
+    --water-fill: #C8DCE8;
+    --water-stroke: #A8C4D4;
+  }
+  */
+
+  /* Soft Fog — cool mist, light slate roads, teal highlights
+  :root {
+    --map-bg: #F0F4F8;
+    --road-base: #CBD5E1;
+    --road-highlight: #0D9488;
+    --text-primary: #334155;
+    --text-secondary: #94A3B8;
+    --water-fill: #C8DCE8;
+    --water-stroke: #A8C4D4;
+  }
+  */
+
+  /* Midnight Ink — indigo-black, dusty purple roads, amber highlights
+  :root {
+    --map-bg: #0F0E17;
+    --road-base: #594E78;
+    --road-highlight: #E8AE68;
+    --text-primary: #FFFFFE;
+    --text-secondary: rgba(255, 255, 255, 0.5);
+    --water-fill: #1A1A2E;
+    --water-stroke: #252545;
+  }
+  */
+
+  /* Deep Forest — dark canopy, sage roads, firefly amber highlights
+  :root {
+    --map-bg: #0B1A14;
+    --road-base: #2D5A3D;
+    --road-highlight: #FFB347;
+    --text-primary: #E6EBD8;
+    --text-secondary: rgba(230, 235, 216, 0.5);
+    --water-fill: #0A2018;
+    --water-stroke: #153028;
+  }
+  */
+
+  /* Original — dark navy, blue roads, cyan highlights
+  :root {
+    --map-bg: #000817;
+    --road-base: #0466C8;
+    --road-highlight: #00FFFF;
+    --text-primary: rgba(255, 255, 255, 0.8);
+    --text-secondary: rgba(255, 255, 255, 0.5);
+    --water-fill: #001030;
+    --water-stroke: #001845;
+  }
+  */
+
+  /* ============================================================ */
+
+  /* Override BaseLayout container to allow full-width map */
+  main.container {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Prose sections (intro & outro) — off-white, decoupled from the dark
+     map palette. Map stays dark; only the surrounding text panels are
+     light. */
+  .explorer-prose {
+    --prose-bg: #F2EBDD;
+    --prose-heading: #1F1A14;
+    --prose-body: #443A30;
+    --prose-muted: #7D7060;
+    background: var(--prose-bg);
+    color: var(--prose-body);
+  }
+
+  .prose-container {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem;
+  }
+
+  .explorer-title {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 300;
+    font-size: 2.8rem;
+    margin-bottom: 1.5rem;
+    color: var(--prose-heading);
+  }
+
+  .explorer-prose p {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 300;
+    font-size: 1.15rem;
+    line-height: 1.75;
+    color: var(--prose-body);
+    margin-bottom: 1.25rem;
+  }
+
+  .reference-note {
+    position: relative;
+    display: inline-block;
+    margin-left: 0.12em;
+    color: var(--prose-heading);
+    cursor: help;
+    font-size: 0.65em;
+    line-height: 1;
+    vertical-align: super;
+  }
+
+  .reference-note-content {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 0.6rem);
+    z-index: 10;
+    width: max-content;
+    max-width: 16rem;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid rgba(31, 26, 20, 0.15);
+    border-radius: 0.45rem;
+    background: #FFFBF1;
+    color: var(--prose-body);
+    font-size: 0.8rem;
+    line-height: 1.35;
+    text-align: left;
+    box-shadow: 0 6px 18px rgba(31, 26, 20, 0.1);
+    transform: translateX(-50%) translateY(0.2rem);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease, transform 140ms ease;
+  }
+
+  .reference-note:hover .reference-note-content,
+  .reference-note:focus .reference-note-content {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+
+  .explorer-prose h2 {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 300;
+    font-size: 2rem;
+    margin-bottom: 1.25rem;
+    color: var(--prose-heading);
+  }
+
+  .scroll-hint {
+    margin-top: 2rem;
+    text-align: center;
+    font-size: 1rem !important;
+    color: var(--prose-muted);
+  }
+
+  .explorer-outro {
+    padding-bottom: 4rem;
+  }
+
+  .scroll-container {
+    position: relative;
+    background: var(--map-bg);
+  }
+
+  .map-viewport {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    width: 100%;
+    overflow: hidden;
+    background: var(--map-bg);
+  }
+
+  .map-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .scroll-spacer {
+    height: 800vh;
+    pointer-events: none;
+  }
+
+  /* Timeline sidebar */
+  .timeline-sidebar {
+    position: absolute;
+    right: 0;
+    top: 0;
+    height: 100%;
+    width: 48px;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.5s ease, width 0.2s ease;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .timeline-sidebar.visible {
+    opacity: 1;
+  }
+
+  .timeline-sidebar:hover {
+    width: 56px;
+  }
+
+  .timeline-track {
+    position: absolute;
+    right: 0;
+    top: 10%;
+    bottom: 10%;
+    width: 100%;
+  }
+
+  .timeline-track::after {
+    content: '';
+    position: absolute;
+    right: 14px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--text-secondary);
+    opacity: 0.3;
+  }
+
+  .timeline-year {
+    position: absolute;
+    right: 22px;
+    transform: translateY(-50%);
+    font-family: 'Roboto', sans-serif;
+    font-weight: 300;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  .timeline-tick {
+    position: absolute;
+    right: 9px;
+    width: 10px;
+    height: 1px;
+    background: var(--text-secondary);
+    opacity: 0.4;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .timeline-indicator {
+    position: absolute;
+    right: 6px;
+    top: 0;
+    display: flex;
+    align-items: center;
+    transform: translateY(-50%);
+    transition: top 0.1s ease-out, opacity 0.3s ease;
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .timeline-date-label {
+    font-family: 'Roboto', sans-serif;
+    font-weight: 400;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+    color: var(--road-highlight);
+    white-space: nowrap;
+    margin-right: 4px;
+  }
+
+  .timeline-indicator-line {
+    width: 16px;
+    height: 2px;
+    background: var(--road-highlight);
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 576px) {
+    .timeline-sidebar {
+      display: none;
+    }
+  }
+
+  /* Hide native scrollbar when timeline is active */
+  html:has(.scroll-container) { scrollbar-width: none; }
+  html:has(.scroll-container)::-webkit-scrollbar { display: none; }
+
+  .loading-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    z-index: 10;
+  }
+
+  .loading-msg.hidden {
+    display: none;
+  }
+
+  /* City highway type styles */
+  #cityEdgesGroup .hw-r { stroke-width: 0.4; stroke-opacity: 0.4; }
+  #cityEdgesGroup .hw-3 { stroke-width: 0.7; stroke-opacity: 0.7; }
+  #cityEdgesGroup .hw-s { stroke-width: 1.0; stroke-opacity: 0.7; }
+  #cityEdgesGroup .hw-p { stroke-width: 1.2; stroke-opacity: 0.8; }
+  #cityEdgesGroup .hw-m { stroke-width: 1.5; stroke-opacity: 0.9; }
+  #cityEdgesGroup .hw-t { stroke-width: 1.5; stroke-opacity: 0.9; }
+
+  /* Boost visited minor roads so highlights are visible */
+  #cityEdgesGroup .visited.hw-3 { stroke-width: 1.3; }
+  #cityEdgesGroup .visited.hw-r { stroke-width: 0.9; }
+
+  /* During zoom-out, suppress visited-road highlights so the crossfade reads
+     as a neutral road network instead of a bright orange blob. Also reset
+     the state-visited stroke-width so the fat orange treatment doesn't pop
+     in mid-transition. */
+  #cityEdgesGroup.zoom-transition .visited,
+  #stateEdgesGroup.zoom-transition .visited {
+    stroke: var(--road-base);
+    stroke-opacity: 0.5;
+  }
+  #stateEdgesGroup.zoom-transition .visited.hw-s { stroke-width: 0.6; }
+  #stateEdgesGroup.zoom-transition .visited.hw-p { stroke-width: 1.0; }
+  #stateEdgesGroup.zoom-transition .visited.hw-m { stroke-width: 1.5; }
+  #stateEdgesGroup.zoom-transition .visited.hw-t { stroke-width: 1.5; }
+
+  /* State highway type styles */
+  #stateEdgesGroup .hw-s { stroke-width: 0.6; stroke-opacity: 0.5; }
+  #stateEdgesGroup .hw-p { stroke-width: 1.0; stroke-opacity: 0.7; }
+  #stateEdgesGroup .hw-m { stroke-width: 1.5; stroke-opacity: 0.9; }
+  #stateEdgesGroup .hw-t { stroke-width: 1.5; stroke-opacity: 0.8; }
+
+  /* Visited state highways get a thicker stroke so the highlight reads as
+     "filled" at state zoom — at 4450px viewBox stretched across viewport,
+     a 1.5 stroke is too thin to draw the eye. */
+  #stateEdgesGroup .visited.hw-s { stroke-width: 1.4; }
+  #stateEdgesGroup .visited.hw-p { stroke-width: 2.0; }
+  #stateEdgesGroup .visited.hw-m { stroke-width: 2.8; }
+  #stateEdgesGroup .visited.hw-t { stroke-width: 2.8; }
+
+  /* Terrain overlay: hidden during city phase, visible during zoom-out and
+     state. `multiply` blend mode means the hillshade's natural shadows
+     darken the parchment bg — peaks/light areas leave the bg untouched.
+     The mtnFadeMask fades the rectangle's hard edges so there's no visible
+     bbox boundary. */
+  #stateTerrainGroup {
+    pointer-events: none;
+    mix-blend-mode: multiply;
+  }
+  #stateTerrainGroup image {
+    opacity: 0.45;
+    mask: url(#mtnFadeMask);
+  }
+
+  /* Base style for road edges */
+  #cityEdgesGroup path,
+  #stateEdgesGroup path {
+    stroke: var(--road-base);
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Water body styles */
+  #cityWaterGroup path,
+  #stateWaterGroup path {
+    fill: var(--water-fill);
+    fill-rule: evenodd;
+    stroke: var(--water-stroke);
+    stroke-width: 0.5;
+    stroke-linejoin: round;
+  }
+
+  /* State water: fill provides all the contrast we need at state zoom.
+     Drop the stroke — at this scale a coastline outline on every polygon
+     reads as a busy blue halo over the entire map. */
+  #stateWaterGroup path {
+    stroke: none;
+  }
+
+  /* City labels — match the state labels: Inter, mixed case, no italics. */
+  #cityLabelsGroup text {
+    fill: var(--text-primary);
+    font-family: var(--label-font, 'Inter', sans-serif);
+    font-weight: 500;
+    pointer-events: none;
+    letter-spacing: 0.04em;
+    paint-order: stroke;
+    stroke: var(--label-halo);
+    stroke-linejoin: round;
+    stroke-width: 4;
+  }
+
+  /* State-zoom labels: Seattle anchor, national parks, mountain range.
+     paint-order + stroke gives a soft dark halo so text reads cleanly
+     over the terrain texture and the road network. */
+  #stateLabelsGroup {
+    pointer-events: none;
+  }
+  #stateLabelsGroup text {
+    font-family: var(--label-font, 'Roboto', sans-serif);
+    font-weight: 300;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--label-halo);
+    stroke-linejoin: round;
+    stroke-width: 6;
+  }
+  #stateLabelsGroup .state-label-city {
+    fill: var(--text-primary);
+    font-size: 50px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+  #stateLabelsGroup .state-label-park {
+    fill: var(--text-secondary);
+    font-size: 44px;
+    letter-spacing: 0.02em;
+  }
+
+  /* SVG background rect */
+  #mapSvg > rect {
+    fill: var(--map-bg);
+  }
+</style>
+
+<script is:inline>
+  // --- Constants ---
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var SVG_PADDING = 40; // Must match export script's PADDING
+
+  // Phase boundaries (fraction of total scroll 0–1)
+  var PHASES = {
+    CITY_REVEAL:  { start: 0,    end: 0.50 },
+    CITY_HOLD:    { start: 0.50, end: 0.584 },
+    ZOOM_OUT:     { start: 0.584, end: 0.78 },
+    STATE_REVEAL: { start: 0.78, end: 0.93 },
+    HOLD:         { start: 0.93, end: 1.0  }
+  };
+
+  // --- DOM refs ---
+  var mapSvg = document.getElementById('mapSvg');
+  var cityEdgesGroup = document.getElementById('cityEdgesGroup');
+  var cityLabelsGroup = document.getElementById('cityLabelsGroup');
+  var stateEdgesGroup = document.getElementById('stateEdgesGroup');
+  var cityWaterGroup = document.getElementById('cityWaterGroup');
+  var stateWaterGroup = document.getElementById('stateWaterGroup');
+  var stateTerrainGroup = document.getElementById('stateTerrainGroup');
+  var stateLabelsGroup = document.getElementById('stateLabelsGroup');
+  var cityWaterExtension = null; // assigned after creation in onMapLoaded
+  var loadingMsg = document.getElementById('loadingMsg');
+  var scrollContainer = document.getElementById('scrollContainer');
+  var timelineIndicator = document.getElementById('timelineIndicator');
+  var timelineDateLabel = document.getElementById('timelineDateLabel');
+
+  // --- State ---
+  var cityData = null;
+  var stateData = null;
+  var loadedCount = 0;
+  var cityLastBucket = -1;
+  var stateLastBucket = -1;
+  var ticking = false;
+
+  // Computed viewBox arrays: [x, y, width, height]
+  var fullStateVB = null;       // Full state SVG coord space (incl. padding)
+  var stateDisplayVB = null;    // Tight viewBox = data extent only — used for state-phase rendering so the annotated map fills the viewport without bg padding
+  var cityAreaVB = null;   // City's geographic extent in state SVG coordinates
+
+  // --- Helpers ---
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function phaseProgress(phase, progress) {
+    if (progress <= phase.start) return 0;
+    if (progress >= phase.end) return 1;
+    return (progress - phase.start) / (phase.end - phase.start);
+  }
+
+  function interpolateViewBox(from, to, t) {
+    return [
+      lerp(from[0], to[0], t),
+      lerp(from[1], to[1], t),
+      lerp(from[2], to[2], t),
+      lerp(from[3], to[3], t)
+    ];
+  }
+
+  function setViewBox(vb) {
+    mapSvg.setAttribute('viewBox', vb[0] + ' ' + vb[1] + ' ' + vb[2] + ' ' + vb[3]);
+  }
+
+  function parseViewBox(str) {
+    return str.split(' ').map(Number);
+  }
+
+  // --- Compute where city's geographic extent falls in state SVG coordinates ---
+  function computeCityAreaInStateSVG(cityGeo, stateGeo, stateVB) {
+    var dataW = stateGeo.east - stateGeo.west;
+    var dataH = stateGeo.north - stateGeo.south;
+    var availW = stateVB[2] - 2 * SVG_PADDING;
+    var availH = stateVB[3] - 2 * SVG_PADDING;
+    var scale = Math.min(availW / dataW, availH / dataH);
+    var offsetX = SVG_PADDING + (availW - dataW * scale) / 2;
+    var offsetY = SVG_PADDING + (availH - dataH * scale) / 2;
+
+    function geoToSVG(lng, lat) {
+      var x = (lng - stateGeo.west) * scale + offsetX;
+      var y = stateVB[3] - ((lat - stateGeo.south) * scale + offsetY);
+      return [x, y];
+    }
+
+    var topLeft = geoToSVG(cityGeo.west, cityGeo.north);
+    var bottomRight = geoToSVG(cityGeo.east, cityGeo.south);
+
+    return [topLeft[0], topLeft[1], bottomRight[0] - topLeft[0], bottomRight[1] - topLeft[1]];
+  }
+
+  // --- Compute the transform to position city SVG paths inside state SVG space ---
+  function computeCityToStateTransform(cityGeo, stateGeo, cityVB, stateVB) {
+    // Reconstruct city SVG transform parameters
+    var cityDataW = cityGeo.east - cityGeo.west;
+    var cityDataH = cityGeo.north - cityGeo.south;
+    var cityAvailW = cityVB[2] - 2 * SVG_PADDING;
+    var cityAvailH = cityVB[3] - 2 * SVG_PADDING;
+    var cityScale = Math.min(cityAvailW / cityDataW, cityAvailH / cityDataH);
+    var cityOX = SVG_PADDING + (cityAvailW - cityDataW * cityScale) / 2;
+    var cityOY = SVG_PADDING + (cityAvailH - cityDataH * cityScale) / 2;
+
+    // Reconstruct state SVG transform parameters
+    var stateDataW = stateGeo.east - stateGeo.west;
+    var stateDataH = stateGeo.north - stateGeo.south;
+    var stateAvailW = stateVB[2] - 2 * SVG_PADDING;
+    var stateAvailH = stateVB[3] - 2 * SVG_PADDING;
+    var stateScale = Math.min(stateAvailW / stateDataW, stateAvailH / stateDataH);
+    var stateOX = SVG_PADDING + (stateAvailW - stateDataW * stateScale) / 2;
+    var stateOY = SVG_PADDING + (stateAvailH - stateDataH * stateScale) / 2;
+
+    // City NW corner (cityGeo.west, cityGeo.north) in city SVG coords
+    // x = cityOX (west edge of data), y = cityOY (north edge, top of data area after Y-flip)
+    // City NW corner in state SVG coords
+    var stateNW_x = (cityGeo.west - stateGeo.west) * stateScale + stateOX;
+    var stateNW_y = stateVB[3] - ((cityGeo.north - stateGeo.south) * stateScale + stateOY);
+
+    // Uniform scale ratio
+    var s = stateScale / cityScale;
+
+    // Translation: statePoint = s * cityPoint + (tx, ty)
+    var tx = stateNW_x - s * cityOX;
+    var ty = stateNW_y - s * cityOY;
+
+    return { s: s, tx: tx, ty: ty };
+  }
+
+  // --- Generate CSS bucket rules for a given group element ---
+  function generateBucketCSS(groupId, count) {
+    var highlightColor = getComputedStyle(document.documentElement).getPropertyValue('--road-highlight').trim();
+    var css = '';
+    for (var i = 0; i < count; i++) {
+      css += '#' + groupId + '.b' + i + ' .bucket-' + i + '{stroke:' + highlightColor + ';stroke-opacity:0.9}\n';
+    }
+    var style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  // --- Render water paths into a group element ---
+  function renderWater(groupEl, paths) {
+    var fragment = document.createDocumentFragment();
+    for (var i = 0; i < paths.length; i++) {
+      var path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', paths[i]);
+      fragment.appendChild(path);
+    }
+    groupEl.appendChild(fragment);
+  }
+
+  // --- Render edges into a group element ---
+  function renderEdges(groupId, data) {
+    var group = document.getElementById(groupId);
+    group.innerHTML = '';
+
+    var fragment = document.createDocumentFragment();
+    for (var j = 0; j < data.edges.length; j++) {
+      var edge = data.edges[j];
+      var path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', edge.d);
+      path.classList.add('hw-' + edge.t);
+
+      if (edge.b >= 0) {
+        path.classList.add('visited', 'bucket-' + edge.b);
+      }
+
+      fragment.appendChild(path);
+    }
+    group.appendChild(fragment);
+  }
+
+  // --- Update bucket classes on a group element ---
+  function updateBuckets(groupEl, lastBucket, newBucket) {
+    if (newBucket > lastBucket) {
+      for (var i = lastBucket + 1; i <= newBucket; i++) {
+        groupEl.classList.add('b' + i);
+      }
+    } else if (newBucket < lastBucket) {
+      for (var i = lastBucket; i > newBucket; i--) {
+        groupEl.classList.remove('b' + i);
+      }
+    }
+  }
+
+  // --- Scroll progress ---
+  function getScrollProgress() {
+    var rect = scrollContainer.getBoundingClientRect();
+    var scrollableHeight = scrollContainer.scrollHeight - window.innerHeight;
+    if (scrollableHeight <= 0) return 0;
+    var scrolled = -rect.top;
+    return Math.max(0, Math.min(1, scrolled / scrollableHeight));
+  }
+
+  // --- Timeline ---
+  var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var tlStart = 0;
+  var tlRange = 0;
+  var cityBucketTimes = null;
+
+  function parseDate(dateStr) {
+    var parts = dateStr.split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  }
+
+  function buildTimeline() {
+    var track = document.getElementById('timelineTrack');
+
+    // Compute full date range from both datasets
+    var startDate = parseDate(cityData.bucketDates[0]);
+    var endDate = parseDate(cityData.bucketDates[cityData.bucketDates.length - 1]);
+    var stStart = parseDate(stateData.bucketDates[0]);
+    var stEnd = parseDate(stateData.bucketDates[stateData.bucketDates.length - 1]);
+    if (stStart < startDate) startDate = stStart;
+    if (stEnd > endDate) endDate = stEnd;
+
+    tlStart = startDate.getTime();
+    tlRange = endDate.getTime() - tlStart;
+
+    // Precompute city bucket timestamps for click-to-scroll
+    cityBucketTimes = [];
+    for (var i = 0; i < cityData.bucketDates.length; i++) {
+      cityBucketTimes.push(parseDate(cityData.bucketDates[i]).getTime());
+    }
+
+    // Year labels
+    var startYear = startDate.getFullYear();
+    var endYear = endDate.getFullYear();
+    for (var y = startYear + 1; y <= endYear; y++) {
+      var yearTime = new Date(y, 0, 1).getTime();
+      var frac = (yearTime - tlStart) / tlRange;
+      if (frac < 0 || frac > 1) continue;
+      var label = document.createElement('div');
+      label.className = 'timeline-year';
+      label.textContent = String(y);
+      label.style.top = (frac * 100) + '%';
+      track.appendChild(label);
+    }
+
+    // Monthly tick marks (skip January — year label already there)
+    var cur = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 1);
+    while (cur < endDate) {
+      var frac = (cur.getTime() - tlStart) / tlRange;
+      if (frac >= 0 && frac <= 1 && cur.getMonth() !== 0) {
+        var tick = document.createElement('div');
+        tick.className = 'timeline-tick';
+        tick.style.top = (frac * 100) + '%';
+        track.appendChild(tick);
+      }
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    document.getElementById('timelineSidebar').classList.add('visible');
+  }
+
+  function updateTimeline(dateStr) {
+    if (!dateStr || !tlRange) {
+      timelineIndicator.style.opacity = '0';
+      return;
+    }
+    var date = parseDate(dateStr);
+    var frac = (date.getTime() - tlStart) / tlRange;
+    frac = Math.max(0, Math.min(1, frac));
+    timelineIndicator.style.top = (frac * 100) + '%';
+    timelineIndicator.style.opacity = '1';
+    timelineDateLabel.textContent = MONTH_NAMES[date.getMonth()] + ' ' + date.getFullYear();
+  }
+
+  function setupTimelineInteraction() {
+    var sidebar = document.getElementById('timelineSidebar');
+    var track = document.getElementById('timelineTrack');
+    var isDragging = false;
+
+    function getDateFracFromY(clientY) {
+      var rect = track.getBoundingClientRect();
+      var frac = (clientY - rect.top) / rect.height;
+      return Math.max(0, Math.min(1, frac));
+    }
+
+    function scrollToDateFraction(frac) {
+      var targetTime = tlStart + frac * tlRange;
+      // Find nearest city bucket
+      var bestIdx = 0;
+      var bestDist = Infinity;
+      for (var i = 0; i < cityBucketTimes.length; i++) {
+        var dist = Math.abs(cityBucketTimes[i] - targetTime);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+      // Map to scroll position in city phase
+      var bucketFrac = bestIdx / (cityData.bucketCount - 1);
+      var scrollProgress = PHASES.CITY_REVEAL.start + bucketFrac * (PHASES.CITY_REVEAL.end - PHASES.CITY_REVEAL.start);
+      // Convert to absolute scroll position
+      var containerPageTop = window.pageYOffset + scrollContainer.getBoundingClientRect().top;
+      var scrollableHeight = scrollContainer.scrollHeight - window.innerHeight;
+      window.scrollTo(0, containerPageTop + scrollProgress * scrollableHeight);
+    }
+
+    sidebar.addEventListener('pointerdown', function(e) {
+      isDragging = true;
+      sidebar.setPointerCapture(e.pointerId);
+      sidebar.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      scrollToDateFraction(getDateFracFromY(e.clientY));
+      e.preventDefault();
+    });
+
+    sidebar.addEventListener('pointermove', function(e) {
+      if (!isDragging) return;
+      scrollToDateFraction(getDateFracFromY(e.clientY));
+    });
+
+    sidebar.addEventListener('pointerup', function() {
+      isDragging = false;
+      sidebar.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+
+    sidebar.addEventListener('lostpointercapture', function() {
+      isDragging = false;
+      sidebar.style.cursor = '';
+      document.body.style.userSelect = '';
+    });
+  }
+
+  // --- Phase-based scroll update ---
+  function updateForProgress(progress) {
+    // Water extension is only meaningful during the static city view. It
+    // would otherwise show as a dark rectangle over Kitsap Peninsula land
+    // during the zoom-out crossfade, since no state water polygon covers
+    // that area.
+    if (cityWaterExtension) {
+      cityWaterExtension.style.display =
+        progress <= PHASES.CITY_HOLD.end ? '' : 'none';
+    }
+
+    // During zoom-out, suppress visited-road highlights on BOTH groups — the
+    // fat orange highlights become very prominent against the fading city
+    // detail and read as a "burst" rather than a transition.
+    var inZoomOut =
+      progress > PHASES.CITY_HOLD.end && progress <= PHASES.ZOOM_OUT.end;
+    cityEdgesGroup.classList.toggle('zoom-transition', inZoomOut);
+    stateEdgesGroup.classList.toggle('zoom-transition', inZoomOut);
+
+    // Phase 1: City reveal — viewBox stays at city area, roads light up
+    if (progress <= PHASES.CITY_REVEAL.end) {
+      var t = phaseProgress(PHASES.CITY_REVEAL, progress);
+      var bucket = Math.min(
+        Math.floor(t * cityData.bucketCount),
+        cityData.bucketCount - 1
+      );
+
+      if (bucket !== cityLastBucket) {
+        updateBuckets(cityEdgesGroup, cityLastBucket, bucket);
+        cityLastBucket = bucket;
+      }
+
+      if (cityLastBucket >= 0) {
+        updateTimeline(cityData.bucketDates[cityLastBucket]);
+      }
+
+      setViewBox(cityAreaVB);
+      cityEdgesGroup.style.opacity = '1';
+      cityWaterGroup.style.opacity = '1';
+      cityEdgesGroup.style.display = '';
+      cityWaterGroup.style.display = '';
+      cityLabelsGroup.style.display = '';
+      cityLabelsGroup.style.opacity = '1';
+      stateEdgesGroup.style.display = 'none';
+      stateWaterGroup.style.display = 'none';
+      stateTerrainGroup.style.display = 'none';
+      stateLabelsGroup.style.display = 'none';
+    }
+
+    // Phase 1.5: City hold — keep the completed city view on screen
+    else if (progress <= PHASES.CITY_HOLD.end) {
+      setViewBox(cityAreaVB);
+      cityEdgesGroup.style.opacity = '1';
+      cityWaterGroup.style.opacity = '1';
+      cityLabelsGroup.style.opacity = '1';
+      cityEdgesGroup.style.display = '';
+      cityWaterGroup.style.display = '';
+      cityLabelsGroup.style.display = '';
+      stateEdgesGroup.style.display = 'none';
+      stateWaterGroup.style.display = 'none';
+      stateTerrainGroup.style.display = 'none';
+      stateLabelsGroup.style.display = 'none';
+
+      if (cityLastBucket >= 0) {
+        updateTimeline(cityData.bucketDates[cityLastBucket]);
+      }
+    }
+
+    // Phase 2: Zoom out — viewBox animates city→state, city fades, state fades in
+    else if (progress <= PHASES.ZOOM_OUT.end) {
+      var t = phaseProgress(PHASES.ZOOM_OUT, progress);
+
+      // Animate viewBox from city area to tight state extent (the data
+      // rectangle, not the padded state viewBox).
+      var vb = interpolateViewBox(cityAreaVB, stateDisplayVB, t);
+      setViewBox(vb);
+
+      // City water hidden (bbox-clip artifact); other groups crossfade.
+      cityEdgesGroup.style.display = '';
+      cityWaterGroup.style.display = 'none';
+      cityLabelsGroup.style.display = '';
+      stateTerrainGroup.style.display = '';
+      stateLabelsGroup.style.display = '';
+      stateEdgesGroup.style.display = '';
+      stateWaterGroup.style.display = '';
+
+      cityEdgesGroup.style.opacity = String(1 - t);
+      cityLabelsGroup.style.opacity = String(1 - t);
+      stateEdgesGroup.style.opacity = String(t);
+      stateWaterGroup.style.opacity = '1';
+      stateTerrainGroup.style.opacity = String(t);
+      stateLabelsGroup.style.opacity = String(t);
+
+      updateTimeline(null);
+    }
+
+    // Phase 3: State reveal — viewBox at full state, state roads light up
+    else if (progress <= PHASES.STATE_REVEAL.end) {
+      var t = phaseProgress(PHASES.STATE_REVEAL, progress);
+      var bucket = Math.min(
+        Math.floor(t * stateData.bucketCount),
+        stateData.bucketCount - 1
+      );
+
+      if (bucket !== stateLastBucket) {
+        updateBuckets(stateEdgesGroup, stateLastBucket, bucket);
+        stateLastBucket = bucket;
+      }
+
+      if (stateLastBucket >= 0) {
+        updateTimeline(stateData.bucketDates[stateLastBucket]);
+      }
+
+      setViewBox(stateDisplayVB);
+      cityEdgesGroup.style.display = 'none';
+      cityWaterGroup.style.display = 'none';
+      cityLabelsGroup.style.display = 'none';
+      stateEdgesGroup.style.opacity = '1';
+      stateWaterGroup.style.opacity = '1';
+      stateEdgesGroup.style.display = '';
+      stateWaterGroup.style.display = '';
+      stateTerrainGroup.style.display = '';
+      stateTerrainGroup.style.opacity = '1';
+      stateLabelsGroup.style.display = '';
+      stateLabelsGroup.style.opacity = '1';
+    }
+
+    // Phase 4: Hold on state view
+    else {
+      setViewBox(stateDisplayVB);
+      cityEdgesGroup.style.display = 'none';
+      cityWaterGroup.style.display = 'none';
+      cityLabelsGroup.style.display = 'none';
+      stateEdgesGroup.style.opacity = '1';
+      stateWaterGroup.style.opacity = '1';
+      stateEdgesGroup.style.display = '';
+      stateWaterGroup.style.display = '';
+      stateTerrainGroup.style.display = '';
+      stateTerrainGroup.style.opacity = '1';
+      stateLabelsGroup.style.display = '';
+      stateLabelsGroup.style.opacity = '1';
+
+      if (stateLastBucket >= 0) {
+        updateTimeline(stateData.bucketDates[stateLastBucket]);
+      }
+    }
+  }
+
+  // --- Scroll handler ---
+  function onScroll() {
+    if (!ticking) {
+      requestAnimationFrame(function() {
+        updateForProgress(getScrollProgress());
+        ticking = false;
+      });
+      ticking = true;
+    }
+  }
+
+  // --- Load one dataset and start when both ready ---
+  function onMapLoaded() {
+    loadedCount++;
+    if (loadedCount === 2) {
+      // Parse viewBoxes
+      var cityVB = parseViewBox(cityData.viewBox);
+      fullStateVB = parseViewBox(stateData.viewBox);
+
+      // Compute the tight data extent within the state SVG coord space.
+      // The state JSON's viewBox (4450x3450) has padding around the data;
+      // the actual rendered data sits in a smaller rectangle. Using THIS
+      // as the displayed viewBox in state phases makes the annotated map
+      // fill the viewport edge-to-edge — no bg padding visible around the
+      // map content.
+      stateDisplayVB = (function (geo, vb) {
+        var dataW = geo.east - geo.west;
+        var dataH = geo.north - geo.south;
+        var availW = vb[2] - 2 * SVG_PADDING;
+        var availH = vb[3] - 2 * SVG_PADDING;
+        var scale = Math.min(availW / dataW, availH / dataH);
+        var offX = SVG_PADDING + (availW - dataW * scale) / 2;
+        var offY = SVG_PADDING + (availH - dataH * scale) / 2;
+        return [offX, offY, dataW * scale, dataH * scale];
+      })(stateData.geoBounds, fullStateVB);
+
+      // Extend Pacific water west and south of the polygon's natural
+      // extent so its straight bbox-clipped edges fall outside the visible
+      // viewBox. L-shaped path covers (1) the western letterbox area and
+      // (2) the southwestern strip below the polygon's south extent (~y=2879)
+      // out to where land begins (~x=500, the southern WA coast). Some
+      // coastal land south of Olympia is colored as water by this rect,
+      // which the user explicitly OK'd as a stylistic trade-off.
+      var stateWaterExtension = document.createElementNS(SVG_NS, 'path');
+      var vbW = fullStateVB[2];
+      var vbH = fullStateVB[3];
+      var dPath = [
+        'M', -vbW, 0,
+        'L', 100, 0,
+        'L', 100, 2800,
+        'L', 500, 2800,
+        'L', 500, vbH,
+        'L', -vbW, vbH,
+        'Z'
+      ].join(' ');
+      stateWaterExtension.setAttribute('d', dPath);
+      stateWaterExtension.setAttribute('fill', 'var(--water-fill)');
+      stateWaterGroup.insertBefore(stateWaterExtension, stateWaterGroup.firstChild);
+
+      // Compute where city falls in state SVG space
+      cityAreaVB = computeCityAreaInStateSVG(
+        cityData.geoBounds, stateData.geoBounds, fullStateVB
+      );
+
+      // Compute and apply transform to position city edges in state SVG space
+      var xform = computeCityToStateTransform(
+        cityData.geoBounds, stateData.geoBounds, cityVB, fullStateVB
+      );
+      var cityTransform = 'translate(' + xform.tx + ',' + xform.ty + ') scale(' + xform.s + ')';
+      cityEdgesGroup.setAttribute('transform', cityTransform);
+      cityWaterGroup.setAttribute('transform', cityTransform);
+      cityLabelsGroup.setAttribute('transform', cityTransform);
+
+      // Add city labels using geo coordinates → city SVG space
+      var cityGeo = cityData.geoBounds;
+      var cDataW = cityGeo.east - cityGeo.west;
+      var cDataH = cityGeo.north - cityGeo.south;
+      var cAvailW = cityVB[2] - 2 * SVG_PADDING;
+      var cAvailH = cityVB[3] - 2 * SVG_PADDING;
+      var cScale = Math.min(cAvailW / cDataW, cAvailH / cDataH);
+      var cOX = SVG_PADDING + (cAvailW - cDataW * cScale) / 2;
+      var cOY = SVG_PADDING + (cAvailH - cDataH * cScale) / 2;
+
+      // Extend water westward past the data extent so Puget Sound reaches the
+      // page edge instead of cutting abruptly at the city's western bound.
+      // Only visible during the city phase — hidden during zoom-out and after
+      // because the rect's rectangular shape would otherwise show as a blob
+      // over Kitsap Peninsula land while the state map fades in.
+      cityWaterExtension = document.createElementNS(SVG_NS, 'rect');
+      cityWaterExtension.setAttribute('x', -cityVB[2]);
+      cityWaterExtension.setAttribute('y', 0);
+      cityWaterExtension.setAttribute('width', cOX + cityVB[2]);
+      cityWaterExtension.setAttribute('height', cityVB[3]);
+      cityWaterExtension.setAttribute('fill', 'var(--water-fill)');
+      cityWaterGroup.insertBefore(cityWaterExtension, cityWaterGroup.firstChild);
+
+      function geoToCitySVG(lng, lat) {
+        var x = (lng - cityGeo.west) * cScale + cOX;
+        var y = cityVB[3] - ((lat - cityGeo.south) * cScale + cOY);
+        return [x, y];
+      }
+
+      var labels = [
+        { name: 'Seattle', lng: -122.3321, lat: 47.6062, size: 0.014 },
+        { name: 'Bellevue', lng: -122.2015, lat: 47.6101, size: 0.011 }
+      ];
+      for (var i = 0; i < labels.length; i++) {
+        var pos = geoToCitySVG(labels[i].lng, labels[i].lat);
+        var text = document.createElementNS(SVG_NS, 'text');
+        text.setAttribute('x', pos[0]);
+        text.setAttribute('y', pos[1]);
+        text.setAttribute('font-size', cityVB[2] * labels[i].size);
+        text.textContent = labels[i].name;
+        cityLabelsGroup.appendChild(text);
+      }
+
+      // Set initial viewBox to city area
+      setViewBox(cityAreaVB);
+
+      // Hide state layers initially
+      stateEdgesGroup.style.display = 'none';
+      stateWaterGroup.style.display = 'none';
+
+      loadingMsg.classList.add('hidden');
+      buildTimeline();
+      setupTimelineInteraction();
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    }
+  }
+
+  // --- Init ---
+  async function init() {
+    try {
+      var responses = await Promise.all([
+        fetch('/assets/data/city-roads.json'),
+        fetch('/assets/data/state-roads.json'),
+        fetch('/assets/data/city-water.json'),
+        fetch('/assets/data/state-water.json')
+      ]);
+
+      if (!responses[0].ok) throw new Error('City: HTTP ' + responses[0].status);
+      if (!responses[1].ok) throw new Error('State: HTTP ' + responses[1].status);
+      // Water files are optional — degrade gracefully
+      var cityWaterData = responses[2].ok ? await responses[2].json() : null;
+      var stateWaterData = responses[3].ok ? await responses[3].json() : null;
+
+      cityData = await responses[0].json();
+      generateBucketCSS('cityEdgesGroup', cityData.bucketCount);
+      if (cityWaterData) renderWater(cityWaterGroup, cityWaterData.paths);
+      renderEdges('cityEdgesGroup', cityData);
+      onMapLoaded();
+
+      stateData = await responses[1].json();
+      generateBucketCSS('stateEdgesGroup', stateData.bucketCount);
+      if (stateWaterData) renderWater(stateWaterGroup, stateWaterData.paths);
+      renderEdges('stateEdgesGroup', stateData);
+      onMapLoaded();
+
+    } catch (error) {
+      console.error('Error:', error);
+      loadingMsg.textContent = 'Error loading data: ' + error.message;
+    }
+  }
+
+  init();
+</script>
