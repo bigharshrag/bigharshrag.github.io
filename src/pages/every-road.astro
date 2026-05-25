@@ -30,69 +30,41 @@ const title = "I Mapped Every Road I've Been On in Seattle";
 
   <!-- Map scroll section -->
   <div class="scroll-container" id="scrollContainer">
-    <div class="map-viewport">
-      <svg id="mapSvg" class="map-layer" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
-        <defs>
-          <!-- Right-edge fade mask: state edges fade to invisible in the
-               last ~12% of viewBox width so roads end naturally at the
-               eastern bbox instead of slicing off mid-screen. -->
-          <linearGradient id="rightEdgeFadeGrad" x1="0" x2="4450" y1="0" y2="0" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="white" />
-            <stop offset="0.88" stop-color="white" />
-            <stop offset="1" stop-color="black" />
-          </linearGradient>
-          <mask id="stateEdgeFadeMask">
-            <rect x="0" y="0" width="4450" height="3450" fill="url(#rightEdgeFadeGrad)" />
-          </mask>
+    <div class="map-viewport" id="mapViewport">
+      <!-- Canvas renderer. All map drawing (roads, water, terrain) happens
+           here via the Canvas 2D API. Labels are positioned HTML for
+           crisp text rendering. -->
+      <canvas id="mapCanvas" class="map-layer"></canvas>
 
-          <!-- Mask for the terrain raster: full visibility through ~85% of
-               the data extent, fades to invisible in the last 15% so the
-               hillshade rectangle's hard edges blend into the bg. Uses
-               userSpaceOnUse coords matching the image position. -->
-          <radialGradient id="mtnFadeGrad" cx="2225" cy="1725" r="2500" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="white" />
-            <stop offset="0.82" stop-color="white" />
-            <stop offset="1" stop-color="black" />
-          </radialGradient>
-          <mask id="mtnFadeMask" maskUnits="userSpaceOnUse" x="40" y="571" width="4370" height="2308">
-            <rect x="40" y="571" width="4370" height="2308" fill="url(#mtnFadeGrad)" />
-          </mask>
-        </defs>
-        <rect width="100%" height="100%" />
-        <g id="stateTerrainGroup" style="display:none">
-          <!-- Shaded relief raster from ESRI World Hillshade, positioned to
-               match the state geographic extent. Geographic bounds
-               (-124.8,46.6 to -120.35,48.95) map to the data area in the
-               state viewBox: (40, 571) to (4410, 2879). -->
-          <image href="/assets/data/state-hillshade.jpg" x="40" y="571" width="4370" height="2308" preserveAspectRatio="none" />
-        </g>
-        <g id="stateWaterGroup"></g>
-        <g id="stateEdgesGroup" mask="url(#stateEdgeFadeMask)"></g>
-        <g id="cityWaterGroup"></g>
-        <g id="cityEdgesGroup"></g>
-        <g id="cityLabelsGroup"></g>
+      <!-- Label overlay layer. Positions are computed per frame from
+           state-SVG coords via the camera transform. data-sx/data-sy are
+           positions in the state SVG coordinate system. -->
+      <div class="map-overlay" id="mapOverlay">
+        <span class="city-label" data-lng="-122.3321" data-lat="47.6062" data-size="0.014">Seattle</span>
+        <span class="city-label" data-lng="-122.2015" data-lat="47.6101" data-size="0.011">Bellevue</span>
+        <span class="state-label state-label-city" data-sx="2465" data-sy="1898">Seattle</span>
+        <span class="state-label state-label-park" data-sx="1218" data-sy="1651">Olympic<br>National Park</span>
+        <span class="state-label state-label-park" data-sx="3026" data-sy="2520">Mt. Rainier<br>National Park</span>
+      </div>
 
-        <!-- State-zoom labels: Seattle (city anchor), Olympic NP,
-             Mt. Rainier NP, Cascades range. Coordinates computed from
-             lng/lat using the same transform the road data uses.
-             Hidden during city phases via the JS phase logic. -->
-        <g id="stateLabelsGroup" style="display:none">
-          <text x="2465" y="1898" class="state-label state-label-city">Seattle</text>
-          <text x="1218" y="1651" class="state-label state-label-park" text-anchor="middle">
-            <tspan x="1218" dy="0">Olympic</tspan>
-            <tspan x="1218" dy="44">National Park</tspan>
-          </text>
-          <text x="3026" y="2520" class="state-label state-label-park" text-anchor="middle">
-            <tspan x="3026" dy="0">Mt. Rainier</tspan>
-            <tspan x="3026" dy="44">National Park</tspan>
-          </text>
-        </g>
-      </svg>
+      <!-- Right-edge fade: replaces the SVG mask. Visible only during
+           state phases; opacity toggled by JS. -->
+      <div class="state-edge-fade" id="stateEdgeFade"></div>
       <div class="timeline-sidebar" id="timelineSidebar">
         <div class="timeline-track" id="timelineTrack">
           <div class="timeline-indicator" id="timelineIndicator">
             <span class="timeline-date-label" id="timelineDateLabel"></span>
             <span class="timeline-indicator-line"></span>
+          </div>
+        </div>
+      </div>
+      <!-- Horizontal timeline: mobile-only. Pinned to the bottom of the
+           sticky map viewport so it anchors the bottom letterbox band and
+           gives the user date context during all phases. -->
+      <div class="mobile-timeline" id="mobileTimeline">
+        <div class="mobile-timeline-track" id="mobileTimelineTrack">
+          <div class="mobile-timeline-indicator" id="mobileTimelineIndicator">
+            <span class="mobile-timeline-date" id="mobileTimelineDate"></span>
           </div>
         </div>
       </div>
@@ -106,10 +78,10 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     <div class="prose-container">
       <h2>How I made this</h2>
       <p>
-        Google Timeline logs your location pretty frequently and for me that's something like 1.8 million GPS pings across several years. 
+        Google Timeline logs your location pretty frequently and for me that's something like 1.8 million GPS pings across several years.
       </p>
       <p>
-        Plotting them raw is unreadable; what you want is each ping snapped to an actual road. So I pulled the road network of every drivable street from OpenStreetMap (~80,000+ edges), and Washington's highways for the state view (~20,000+ edges). 
+        Plotting them raw is unreadable; what you want is each ping snapped to an actual road. So I pulled the road network of every drivable street from OpenStreetMap (~80,000+ edges), and Washington's highways for the state view (~20,000+ edges).
         I mapped each GPS ping to its nearest road to get the edges I directly drove on (40%<span class="reference-note" tabindex="0" aria-label="The rest is dominated by tiny edges of tertiary roads">[1]<span class="reference-note-content" role="tooltip">The rest is dominated by tiny edges of tertiary roads</span></span> of the map).
       </p>
       <p>
@@ -335,6 +307,18 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     pointer-events: none;
   }
 
+  /* Mobile portrait: the map letterboxes inside the sticky 100dvh viewport.
+     A horizontal timeline anchors the bottom band; the rest reads as page
+     padding. Terrain mix-blend-mode + mask is disabled because iOS Safari
+     GPU-composites them per frame and the cost is brutal during scroll;
+     fall back to a low-opacity plain image so terrain texture still hints
+     at relief but doesn't tank perf. */
+  @media (max-width: 768px) and (orientation: portrait) {
+    .scroll-spacer {
+      height: 300vh;
+    }
+  }
+
   /* Timeline sidebar */
   .timeline-sidebar {
     position: absolute;
@@ -434,6 +418,79 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     }
   }
 
+  /* Mobile horizontal timeline — anchors the bottom band of the
+     letterboxed map on portrait phones. Hidden on desktop. */
+  .mobile-timeline {
+    display: none;
+  }
+  @media (max-width: 768px) and (orientation: portrait) {
+    .mobile-timeline {
+      display: block;
+      position: absolute;
+      bottom: 1.25rem;
+      left: 1.5rem;
+      right: 1.5rem;
+      height: 36px;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+    .mobile-timeline.visible {
+      opacity: 1;
+    }
+  }
+  .mobile-timeline-track {
+    position: relative;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 100%;
+    height: 1px;
+    background: var(--text-secondary);
+    opacity: 0.4;
+  }
+  .mobile-timeline-tick {
+    position: absolute;
+    top: -3px;
+    width: 1px;
+    height: 7px;
+    background: var(--text-secondary);
+    opacity: 0.7;
+    transform: translateX(-50%);
+  }
+  .mobile-timeline-year {
+    position: absolute;
+    top: 8px;
+    transform: translateX(-50%);
+    font-family: 'Roboto', sans-serif;
+    font-weight: 300;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .mobile-timeline-indicator {
+    position: absolute;
+    top: -6px;
+    left: 0;
+    width: 2px;
+    height: 13px;
+    background: var(--road-highlight);
+    transform: translateX(-50%);
+    transition: left 0.1s ease-out;
+  }
+  .mobile-timeline-date {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Roboto', sans-serif;
+    font-weight: 500;
+    font-size: 0.8rem;
+    color: var(--road-highlight);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+
   /* Hide native scrollbar when timeline is active */
   html:has(.scroll-container) { scrollbar-width: none; }
   html:has(.scroll-container)::-webkit-scrollbar { display: none; }
@@ -452,145 +509,107 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     display: none;
   }
 
-  /* City highway type styles */
-  #cityEdgesGroup .hw-r { stroke-width: 0.4; stroke-opacity: 0.4; }
-  #cityEdgesGroup .hw-3 { stroke-width: 0.7; stroke-opacity: 0.7; }
-  #cityEdgesGroup .hw-s { stroke-width: 1.0; stroke-opacity: 0.7; }
-  #cityEdgesGroup .hw-p { stroke-width: 1.2; stroke-opacity: 0.8; }
-  #cityEdgesGroup .hw-m { stroke-width: 1.5; stroke-opacity: 0.9; }
-  #cityEdgesGroup .hw-t { stroke-width: 1.5; stroke-opacity: 0.9; }
-
-  /* Boost visited minor roads so highlights are visible */
-  #cityEdgesGroup .visited.hw-3 { stroke-width: 1.3; }
-  #cityEdgesGroup .visited.hw-r { stroke-width: 0.9; }
-
-  /* Roads "light up" as the timeline reveals them. Per-path class instead
-     of parent-class toggle: invalidating 84k descendants on every bucket
-     transition caused 250ms style recalcs on mobile. */
-  #cityEdgesGroup .lit,
-  #stateEdgesGroup .lit {
-    stroke: var(--road-highlight);
-    stroke-opacity: 0.9;
+  /* Canvas renderer + HTML label overlay layer. Both span the
+     full sticky viewport. Canvas draws roads/water/terrain; label
+     overlay sits on top with absolute positioning, repositioned per
+     frame by JS via the same camera transform. */
+  #mapCanvas {
+    image-rendering: -webkit-optimize-contrast;
   }
-
-  /* During zoom-out, suppress visited-road highlights so the crossfade reads
-     as a neutral road network instead of a bright orange blob. Also reset
-     the state-visited stroke-width so the fat orange treatment doesn't pop
-     in mid-transition. */
-  #cityEdgesGroup.zoom-transition .lit,
-  #stateEdgesGroup.zoom-transition .lit {
-    stroke: var(--road-base);
-    stroke-opacity: 0.5;
-  }
-  #stateEdgesGroup.zoom-transition .visited.hw-s { stroke-width: 0.6; }
-  #stateEdgesGroup.zoom-transition .visited.hw-p { stroke-width: 1.0; }
-  #stateEdgesGroup.zoom-transition .visited.hw-m { stroke-width: 1.5; }
-  #stateEdgesGroup.zoom-transition .visited.hw-t { stroke-width: 1.5; }
-
-  /* State highway type styles */
-  #stateEdgesGroup .hw-s { stroke-width: 0.6; stroke-opacity: 0.5; }
-  #stateEdgesGroup .hw-p { stroke-width: 1.0; stroke-opacity: 0.7; }
-  #stateEdgesGroup .hw-m { stroke-width: 1.5; stroke-opacity: 0.9; }
-  #stateEdgesGroup .hw-t { stroke-width: 1.5; stroke-opacity: 0.8; }
-
-  /* Visited state highways get a thicker stroke so the highlight reads as
-     "filled" at state zoom — at 4450px viewBox stretched across viewport,
-     a 1.5 stroke is too thin to draw the eye. */
-  #stateEdgesGroup .visited.hw-s { stroke-width: 1.4; }
-  #stateEdgesGroup .visited.hw-p { stroke-width: 2.0; }
-  #stateEdgesGroup .visited.hw-m { stroke-width: 2.8; }
-  #stateEdgesGroup .visited.hw-t { stroke-width: 2.8; }
-
-  /* Terrain overlay: hidden during city phase, visible during zoom-out and
-     state. `multiply` blend mode means the hillshade's natural shadows
-     darken the parchment bg — peaks/light areas leave the bg untouched.
-     The mtnFadeMask fades the rectangle's hard edges so there's no visible
-     bbox boundary. */
-  #stateTerrainGroup {
+  .map-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
     pointer-events: none;
-    mix-blend-mode: multiply;
-  }
-  #stateTerrainGroup image {
-    opacity: 0.45;
-    mask: url(#mtnFadeMask);
+    overflow: hidden;
   }
 
-  /* Base style for road edges */
-  #cityEdgesGroup path,
-  #stateEdgesGroup path {
-    stroke: var(--road-base);
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  /* Right-edge fade: replaces the old SVG mask. Pure CSS gradient =
+     GPU-cheap. Visible only during state phases; JS toggles opacity. */
+  .state-edge-fade {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 14%;
+    height: 100%;
+    background: linear-gradient(to right, transparent, var(--map-bg));
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 5;
+  }
+  .state-edge-fade.visible {
+    opacity: 1;
   }
 
-  /* Water body styles */
-  #cityWaterGroup path,
-  #stateWaterGroup path {
-    fill: var(--water-fill);
-    fill-rule: evenodd;
-    stroke: var(--water-stroke);
-    stroke-width: 0.5;
-    stroke-linejoin: round;
-  }
-
-  /* State water: fill provides all the contrast we need at state zoom.
-     Drop the stroke — at this scale a coastline outline on every polygon
-     reads as a busy blue halo over the entire map. */
-  #stateWaterGroup path {
-    stroke: none;
-  }
-
-  /* City labels — match the state labels: Inter, mixed case, no italics. */
-  #cityLabelsGroup text {
-    fill: var(--text-primary);
+  /* City labels: HTML overlays positioned per frame. Halo via
+     text-shadow rather than SVG paint-order — same look, no SVG. */
+  .city-label,
+  .state-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: var(--text-primary);
     font-family: var(--label-font, 'Inter', sans-serif);
-    font-weight: 500;
     pointer-events: none;
     letter-spacing: 0.04em;
-    paint-order: stroke;
-    stroke: var(--label-halo);
-    stroke-linejoin: round;
-    stroke-width: 4;
+    white-space: nowrap;
+    transform-origin: center center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    will-change: transform, opacity;
+    line-height: 1.05;
+    /* Parchment-colored halo. Multiple offset shadows simulate
+       paint-order: stroke (browsers render text-shadow under the fill). */
+    text-shadow:
+      -2px 0 var(--label-halo), 2px 0 var(--label-halo),
+      0 -2px var(--label-halo), 0 2px var(--label-halo),
+      -2px -2px var(--label-halo), 2px 2px var(--label-halo),
+      -2px 2px var(--label-halo), 2px -2px var(--label-halo);
   }
-
-  /* State-zoom labels: Seattle anchor, national parks, mountain range.
-     paint-order + stroke gives a soft dark halo so text reads cleanly
-     over the terrain texture and the road network. */
-  #stateLabelsGroup {
-    pointer-events: none;
+  .city-label {
+    font-weight: 500;
   }
-  #stateLabelsGroup text {
+  .city-label.visible,
+  .state-label.visible {
+    opacity: 1;
+  }
+  .state-label {
     font-family: var(--label-font, 'Roboto', sans-serif);
     font-weight: 300;
-    pointer-events: none;
-    paint-order: stroke;
-    stroke: var(--label-halo);
-    stroke-linejoin: round;
-    stroke-width: 6;
+    text-align: center;
   }
-  #stateLabelsGroup .state-label-city {
-    fill: var(--text-primary);
-    font-size: 50px;
+  .state-label-city {
+    color: var(--text-primary);
+    font-size: 1rem;
     font-weight: 500;
     letter-spacing: 0.04em;
   }
-  #stateLabelsGroup .state-label-park {
-    fill: var(--text-secondary);
-    font-size: 44px;
+  .state-label-park {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
     letter-spacing: 0.02em;
-  }
-
-  /* SVG background rect */
-  #mapSvg > rect {
-    fill: var(--map-bg);
+    line-height: 1.05;
   }
 </style>
 
 <script is:inline>
+  // ============================================================
+  // CANVAS RENDERER
+  //
+  // The road network never changes after load. Previously this page
+  // rasterized 84k+ SVG paths per scroll frame; this version parses
+  // every path once into a Path2D, then per frame just calls ctx.stroke
+  // on already-parsed paths under a cheap camera transform. Everything
+  // expensive happens at init.
+  // ============================================================
+
   // --- Constants ---
-  var SVG_NS = 'http://www.w3.org/2000/svg';
   var SVG_PADDING = 40; // Must match export script's PADDING
+  var DPR = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+  var TYPE_KEYS = ['r', '3', 's', 'p', 'm', 't'];
 
   // Phase boundaries (fraction of total scroll 0–1)
   var PHASES = {
@@ -601,40 +620,90 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     HOLD:         { start: 0.93, end: 1.0  }
   };
 
+  // Stroke styles per layer + per highway type. Widths/opacities are in
+  // SVG user units (state coord system); they get scaled by the camera
+  // transform so they read correctly at city zoom vs. state zoom.
+  var STROKE_STYLES = {
+    city: {
+      'r': { baseWidth: 0.4, baseOpacity: 0.4, litWidth: 0.9 },
+      '3': { baseWidth: 0.7, baseOpacity: 0.7, litWidth: 1.3 },
+      's': { baseWidth: 1.0, baseOpacity: 0.7, litWidth: 1.0 },
+      'p': { baseWidth: 1.2, baseOpacity: 0.8, litWidth: 1.2 },
+      'm': { baseWidth: 1.5, baseOpacity: 0.9, litWidth: 1.5 },
+      't': { baseWidth: 1.5, baseOpacity: 0.9, litWidth: 1.5 }
+    },
+    state: {
+      's': { baseWidth: 0.6, baseOpacity: 0.5, litWidth: 1.4 },
+      'p': { baseWidth: 1.0, baseOpacity: 0.7, litWidth: 2.0 },
+      'm': { baseWidth: 1.5, baseOpacity: 0.9, litWidth: 2.8 },
+      't': { baseWidth: 1.5, baseOpacity: 0.8, litWidth: 2.8 }
+    }
+  };
+
   // --- DOM refs ---
-  var mapSvg = document.getElementById('mapSvg');
-  var cityEdgesGroup = document.getElementById('cityEdgesGroup');
-  var cityLabelsGroup = document.getElementById('cityLabelsGroup');
-  var stateEdgesGroup = document.getElementById('stateEdgesGroup');
-  var cityWaterGroup = document.getElementById('cityWaterGroup');
-  var stateWaterGroup = document.getElementById('stateWaterGroup');
-  var stateTerrainGroup = document.getElementById('stateTerrainGroup');
-  var stateLabelsGroup = document.getElementById('stateLabelsGroup');
-  var cityWaterExtension = null; // assigned after creation in onMapLoaded
+  var canvas = document.getElementById('mapCanvas');
+  var ctx = canvas.getContext('2d');
+  var mapViewport = document.getElementById('mapViewport');
+  var mapOverlay = document.getElementById('mapOverlay');
+  var stateEdgeFade = document.getElementById('stateEdgeFade');
   var loadingMsg = document.getElementById('loadingMsg');
   var scrollContainer = document.getElementById('scrollContainer');
   var timelineIndicator = document.getElementById('timelineIndicator');
   var timelineDateLabel = document.getElementById('timelineDateLabel');
+  var mobileTimelineIndicator = document.getElementById('mobileTimelineIndicator');
+  var mobileTimelineDate = document.getElementById('mobileTimelineDate');
+  var cityLabelEls = Array.prototype.slice.call(mapOverlay.querySelectorAll('.city-label'));
+  var stateLabelEls = Array.prototype.slice.call(mapOverlay.querySelectorAll('.state-label'));
+
+  // --- Palette (read once from CSS custom properties) ---
+  var palette = (function () {
+    var s = getComputedStyle(document.documentElement);
+    return {
+      mapBg: s.getPropertyValue('--map-bg').trim() || '#F2EBDD',
+      roadBase: s.getPropertyValue('--road-base').trim() || '#B8A38A',
+      roadHighlight: s.getPropertyValue('--road-highlight').trim() || '#1F1208',
+      waterFill: s.getPropertyValue('--water-fill').trim() || '#B6CFE0'
+    };
+  })();
 
   // --- State ---
-  var cityData = null;
-  var stateData = null;
-  var loadedCount = 0;
-  var cityLastBucket = -1;
-  var stateLastBucket = -1;
-  var cityBucketPaths = null;
-  var stateBucketPaths = null;
-  var ticking = false;
+  var cityData = null, stateData = null;
+  var cityWaterData = null, stateWaterData = null;
+  var cityEdges = null, statePaths = null;  // edges: [{t, b}, ...]; paths: [Path2D, ...]
+  var cityPaths = null, stateEdges = null;
+  var cityWaterPaths = null, stateWaterPaths = null;
+  var cityWaterExtensionRect = null;        // {x, y, w, h} in city coords
+  var stateWaterExtensionPath = null;       // Path2D in state coords
+  var terrainImage = null;
 
-  // Computed viewBox arrays: [x, y, width, height]
-  var fullStateVB = null;       // Full state SVG coord space (incl. padding)
-  var stateDisplayVB = null;    // Tight viewBox = data extent only — used for state-phase rendering so the annotated map fills the viewport without bg padding
-  var cityAreaVB = null;   // City's geographic extent in state SVG coordinates
+  // ViewBox state ([x, y, w, h])
+  var fullStateVB = null;
+  var stateDisplayVB = null;
+  var cityAreaVB = null;
+  var displayedCityVB = null, displayedStateVB = null;
+  var cityToStateMatrix = null;             // DOMMatrix (city coords → state coords)
+
+  // Label positions (state coords) — precomputed at load
+  var cityLabelStatePositions = [];
+
+  // Bucket reveal counters — replaces per-path .lit class machinery
+  var cityLitUntil = 0;
+  var stateLitUntil = 0;
+  var lastCityBucket = -1, lastStateBucket = -1;
+
+  // Scroll geometry (cached on load/resize, NOT read per frame)
+  var cachedScrollTop = 0;
+  var cachedScrollRange = 1;
+
+  // Render flags
+  var ticking = false;
+  var loadedCount = 0;
+  var dataReady = false;
+  var lastEdgeFadeVisible = false;
+  var cssWidth = 0, cssHeight = 0;
 
   // --- Helpers ---
-  function lerp(a, b, t) {
-    return a + (b - a) * t;
-  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
 
   function phaseProgress(phase, progress) {
     if (progress <= phase.start) return 0;
@@ -651,13 +720,7 @@ const title = "I Mapped Every Road I've Been On in Seattle";
     ];
   }
 
-  function setViewBox(vb) {
-    mapSvg.setAttribute('viewBox', vb[0] + ' ' + vb[1] + ' ' + vb[2] + ' ' + vb[3]);
-  }
-
-  function parseViewBox(str) {
-    return str.split(' ').map(Number);
-  }
+  function parseViewBox(str) { return str.split(' ').map(Number); }
 
   // --- Compute where city's geographic extent falls in state SVG coordinates ---
   function computeCityAreaInStateSVG(cityGeo, stateGeo, stateVB) {
@@ -718,70 +781,54 @@ const title = "I Mapped Every Road I've Been On in Seattle";
   }
 
   // --- Render water paths into a group element ---
-  function renderWater(groupEl, paths) {
-    var fragment = document.createDocumentFragment();
-    for (var i = 0; i < paths.length; i++) {
-      var path = document.createElementNS(SVG_NS, 'path');
-      path.setAttribute('d', paths[i]);
-      fragment.appendChild(path);
+  // --- Parse edges into Path2D objects + a per-type index. Each path
+  // string is parsed once at load; render only calls ctx.stroke on the
+  // already-parsed Path2D. ---
+  function buildPathsAndEdges(data) {
+    var paths = new Array(data.edges.length);
+    var edges = new Array(data.edges.length);
+    var byType = {};
+    for (var t = 0; t < TYPE_KEYS.length; t++) byType[TYPE_KEYS[t]] = [];
+    for (var i = 0; i < data.edges.length; i++) {
+      var e = data.edges[i];
+      paths[i] = new Path2D(e.d);
+      edges[i] = { t: e.t, b: e.b };
+      if (byType[e.t]) byType[e.t].push(i);
     }
-    groupEl.appendChild(fragment);
+    edges._byType = byType;
+    return { paths: paths, edges: edges };
   }
 
-  // --- Render edges into a group element. Returns an array indexed by
-  // bucket number containing the path elements in that bucket — used by
-  // updateBuckets to light up paths incrementally without re-querying the
-  // DOM. ---
-  function renderEdges(groupId, data) {
-    var group = document.getElementById(groupId);
-    group.innerHTML = '';
-
-    var bucketPaths = [];
-    for (var k = 0; k < data.bucketCount; k++) bucketPaths.push([]);
-
-    var fragment = document.createDocumentFragment();
-    for (var j = 0; j < data.edges.length; j++) {
-      var edge = data.edges[j];
-      var path = document.createElementNS(SVG_NS, 'path');
-      path.setAttribute('d', edge.d);
-      path.classList.add('hw-' + edge.t);
-
-      if (edge.b >= 0) {
-        path.classList.add('visited');
-        bucketPaths[edge.b].push(path);
-      }
-
-      fragment.appendChild(path);
-    }
-    group.appendChild(fragment);
-    return bucketPaths;
+  function buildWaterPaths(data) {
+    if (!data || !data.paths) return [];
+    var out = new Array(data.paths.length);
+    for (var i = 0; i < data.paths.length; i++) out[i] = new Path2D(data.paths[i]);
+    return out;
   }
 
-  // --- Add/remove the .lit class on paths between buckets. Touching each
-  // affected path directly (instead of toggling a parent class) keeps the
-  // browser's style invalidation scoped to ~thousands of leaf paths
-  // instead of all 84k descendants. ---
-  function updateBuckets(bucketPaths, lastBucket, newBucket) {
-    if (newBucket > lastBucket) {
-      for (var i = lastBucket + 1; i <= newBucket; i++) {
-        var paths = bucketPaths[i];
-        for (var j = 0; j < paths.length; j++) paths[j].classList.add('lit');
-      }
-    } else if (newBucket < lastBucket) {
-      for (var i = lastBucket; i > newBucket; i--) {
-        var paths = bucketPaths[i];
-        for (var j = 0; j < paths.length; j++) paths[j].classList.remove('lit');
-      }
-    }
-  }
-
-  // --- Scroll progress ---
-  function getScrollProgress() {
+  // --- Cached scroll geometry (read once on load + on resize). Replaces
+  // getBoundingClientRect per frame, which was a forced layout reflow. ---
+  function recomputeScrollGeometry() {
     var rect = scrollContainer.getBoundingClientRect();
-    var scrollableHeight = scrollContainer.scrollHeight - window.innerHeight;
-    if (scrollableHeight <= 0) return 0;
-    var scrolled = -rect.top;
-    return Math.max(0, Math.min(1, scrolled / scrollableHeight));
+    cachedScrollTop = window.scrollY + rect.top;
+    cachedScrollRange = Math.max(1, scrollContainer.scrollHeight - window.innerHeight);
+  }
+
+  function getScrollProgress() {
+    var p = (window.scrollY - cachedScrollTop) / cachedScrollRange;
+    return p < 0 ? 0 : (p > 1 ? 1 : p);
+  }
+
+  // --- Canvas sizing. CSS size matches the sticky viewport; backing-store
+  // pixel size is multiplied by devicePixelRatio so it stays crisp. ---
+  function resizeCanvas() {
+    var rect = mapViewport.getBoundingClientRect();
+    cssWidth = rect.width;
+    cssHeight = rect.height;
+    canvas.width = Math.round(cssWidth * DPR);
+    canvas.height = Math.round(cssHeight * DPR);
+    canvas.style.width = cssWidth + 'px';
+    canvas.style.height = cssHeight + 'px';
   }
 
   // --- Timeline ---
@@ -797,6 +844,7 @@ const title = "I Mapped Every Road I've Been On in Seattle";
 
   function buildTimeline() {
     var track = document.getElementById('timelineTrack');
+    var mobileTrack = document.getElementById('mobileTimelineTrack');
 
     // Compute full date range from both datasets
     var startDate = parseDate(cityData.bucketDates[0]);
@@ -815,18 +863,26 @@ const title = "I Mapped Every Road I've Been On in Seattle";
       cityBucketTimes.push(parseDate(cityData.bucketDates[i]).getTime());
     }
 
-    // Year labels
+    // Year labels — sidebar uses `top` (vertical), mobile uses `left`
+    // (horizontal). Same fraction in both cases.
     var startYear = startDate.getFullYear();
     var endYear = endDate.getFullYear();
     for (var y = startYear + 1; y <= endYear; y++) {
       var yearTime = new Date(y, 0, 1).getTime();
       var frac = (yearTime - tlStart) / tlRange;
       if (frac < 0 || frac > 1) continue;
+
       var label = document.createElement('div');
       label.className = 'timeline-year';
       label.textContent = String(y);
       label.style.top = (frac * 100) + '%';
       track.appendChild(label);
+
+      var mLabel = document.createElement('div');
+      mLabel.className = 'mobile-timeline-year';
+      mLabel.textContent = String(y);
+      mLabel.style.left = (frac * 100) + '%';
+      mobileTrack.appendChild(mLabel);
     }
 
     // Monthly tick marks (skip January — year label already there)
@@ -838,24 +894,35 @@ const title = "I Mapped Every Road I've Been On in Seattle";
         tick.className = 'timeline-tick';
         tick.style.top = (frac * 100) + '%';
         track.appendChild(tick);
+
+        var mTick = document.createElement('div');
+        mTick.className = 'mobile-timeline-tick';
+        mTick.style.left = (frac * 100) + '%';
+        mobileTrack.appendChild(mTick);
       }
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
 
     document.getElementById('timelineSidebar').classList.add('visible');
+    document.getElementById('mobileTimeline').classList.add('visible');
   }
 
   function updateTimeline(dateStr) {
     if (!dateStr || !tlRange) {
       timelineIndicator.style.opacity = '0';
+      mobileTimelineIndicator.style.opacity = '0';
       return;
     }
     var date = parseDate(dateStr);
     var frac = (date.getTime() - tlStart) / tlRange;
     frac = Math.max(0, Math.min(1, frac));
+    var label = MONTH_NAMES[date.getMonth()] + ' ' + date.getFullYear();
     timelineIndicator.style.top = (frac * 100) + '%';
     timelineIndicator.style.opacity = '1';
-    timelineDateLabel.textContent = MONTH_NAMES[date.getMonth()] + ' ' + date.getFullYear();
+    timelineDateLabel.textContent = label;
+    mobileTimelineIndicator.style.left = (frac * 100) + '%';
+    mobileTimelineIndicator.style.opacity = '1';
+    mobileTimelineDate.textContent = label;
   }
 
   function setupTimelineInteraction() {
@@ -918,324 +985,450 @@ const title = "I Mapped Every Road I've Been On in Seattle";
   }
 
   // --- Phase-based scroll update ---
-  function updateForProgress(progress) {
-    // Water extension is only meaningful during the static city view. It
-    // would otherwise show as a dark rectangle over Kitsap Peninsula land
-    // during the zoom-out crossfade, since no state water polygon covers
-    // that area.
-    if (cityWaterExtension) {
-      cityWaterExtension.style.display =
-        progress <= PHASES.CITY_HOLD.end ? '' : 'none';
-    }
+  // --- Camera: maps scroll progress to view state.
+  // Returns the current visible viewBox + per-layer opacities + flags.
+  // Pure function: no DOM writes here. ---
+  function computeCamera(progress) {
+    var phase, visibleVB, zoomDim = false, cityWaterExtensionVisible = false;
+    var opacities = {
+      cityEdges: 0, cityWater: 0, cityLabels: 0,
+      stateEdges: 0, stateWater: 0, stateTerrain: 0, stateLabels: 0
+    };
 
-    // During zoom-out, suppress visited-road highlights on BOTH groups — the
-    // fat orange highlights become very prominent against the fading city
-    // detail and read as a "burst" rather than a transition.
-    var inZoomOut =
-      progress > PHASES.CITY_HOLD.end && progress <= PHASES.ZOOM_OUT.end;
-    cityEdgesGroup.classList.toggle('zoom-transition', inZoomOut);
-    stateEdgesGroup.classList.toggle('zoom-transition', inZoomOut);
-
-    // Phase 1: City reveal — viewBox stays at city area, roads light up
-    if (progress <= PHASES.CITY_REVEAL.end) {
-      var t = phaseProgress(PHASES.CITY_REVEAL, progress);
-      var bucket = Math.min(
-        Math.floor(t * cityData.bucketCount),
-        cityData.bucketCount - 1
-      );
-
-      if (bucket !== cityLastBucket) {
-        updateBuckets(cityBucketPaths, cityLastBucket, bucket);
-        cityLastBucket = bucket;
-      }
-
-      if (cityLastBucket >= 0) {
-        updateTimeline(cityData.bucketDates[cityLastBucket]);
-      }
-
-      setViewBox(cityAreaVB);
-      cityEdgesGroup.style.opacity = '1';
-      cityWaterGroup.style.opacity = '1';
-      cityEdgesGroup.style.display = '';
-      cityWaterGroup.style.display = '';
-      cityLabelsGroup.style.display = '';
-      cityLabelsGroup.style.opacity = '1';
-      stateEdgesGroup.style.display = 'none';
-      stateWaterGroup.style.display = 'none';
-      stateTerrainGroup.style.display = 'none';
-      stateLabelsGroup.style.display = 'none';
-    }
-
-    // Phase 1.5: City hold — keep the completed city view on screen
-    else if (progress <= PHASES.CITY_HOLD.end) {
-      setViewBox(cityAreaVB);
-      cityEdgesGroup.style.opacity = '1';
-      cityWaterGroup.style.opacity = '1';
-      cityLabelsGroup.style.opacity = '1';
-      cityEdgesGroup.style.display = '';
-      cityWaterGroup.style.display = '';
-      cityLabelsGroup.style.display = '';
-      stateEdgesGroup.style.display = 'none';
-      stateWaterGroup.style.display = 'none';
-      stateTerrainGroup.style.display = 'none';
-      stateLabelsGroup.style.display = 'none';
-
-      if (cityLastBucket >= 0) {
-        updateTimeline(cityData.bucketDates[cityLastBucket]);
-      }
-    }
-
-    // Phase 2: Zoom out — viewBox animates city→state, city fades, state fades in
-    else if (progress <= PHASES.ZOOM_OUT.end) {
+    if (progress <= PHASES.CITY_HOLD.end) {
+      phase = 'city';
+      visibleVB = displayedCityVB;
+      opacities.cityEdges = 1;
+      opacities.cityWater = 1;
+      opacities.cityLabels = 1;
+      cityWaterExtensionVisible = true;
+    } else if (progress <= PHASES.ZOOM_OUT.end) {
+      phase = 'zoom';
       var t = phaseProgress(PHASES.ZOOM_OUT, progress);
-
-      // Animate viewBox from city area to tight state extent (the data
-      // rectangle, not the padded state viewBox).
-      var vb = interpolateViewBox(cityAreaVB, stateDisplayVB, t);
-      setViewBox(vb);
-
-      // City water hidden (bbox-clip artifact); other groups crossfade.
-      cityEdgesGroup.style.display = '';
-      cityWaterGroup.style.display = 'none';
-      cityLabelsGroup.style.display = '';
-      stateTerrainGroup.style.display = '';
-      stateLabelsGroup.style.display = '';
-      stateEdgesGroup.style.display = '';
-      stateWaterGroup.style.display = '';
-
-      cityEdgesGroup.style.opacity = String(1 - t);
-      cityLabelsGroup.style.opacity = String(1 - t);
-      stateEdgesGroup.style.opacity = String(t);
-      stateWaterGroup.style.opacity = '1';
-      stateTerrainGroup.style.opacity = String(t);
-      stateLabelsGroup.style.opacity = String(t);
-
-      updateTimeline(null);
+      visibleVB = interpolateViewBox(displayedCityVB, displayedStateVB, t);
+      opacities.cityEdges = 1 - t;
+      opacities.cityLabels = 1 - t;
+      opacities.cityWater = 0;
+      opacities.stateEdges = t;
+      opacities.stateWater = 1;
+      opacities.stateTerrain = t;
+      opacities.stateLabels = t;
+      zoomDim = true;
+    } else {
+      phase = 'state';
+      visibleVB = displayedStateVB;
+      opacities.stateEdges = 1;
+      opacities.stateWater = 1;
+      opacities.stateTerrain = 1;
+      opacities.stateLabels = 1;
     }
 
-    // Phase 3: State reveal — viewBox at full state, state roads light up
-    else if (progress <= PHASES.STATE_REVEAL.end) {
-      var t = phaseProgress(PHASES.STATE_REVEAL, progress);
-      var bucket = Math.min(
-        Math.floor(t * stateData.bucketCount),
-        stateData.bucketCount - 1
+    return {
+      phase: phase,
+      visibleVB: visibleVB,
+      opacities: opacities,
+      cityWaterExtensionVisible: cityWaterExtensionVisible,
+      zoomDim: zoomDim
+    };
+  }
+
+  // --- Bucket reveal counters. No DOM writes — the next render frame
+  // colors paths based on these numbers. ---
+  function updateBuckets(progress) {
+    var newCityBucket = -1;
+    var newStateBucket = -1;
+    if (progress <= PHASES.CITY_REVEAL.end) {
+      var tc = phaseProgress(PHASES.CITY_REVEAL, progress);
+      newCityBucket = Math.min(Math.floor(tc * cityData.bucketCount), cityData.bucketCount - 1);
+    } else {
+      newCityBucket = cityData.bucketCount - 1;
+    }
+    if (progress > PHASES.ZOOM_OUT.end) {
+      var ts = phaseProgress(PHASES.STATE_REVEAL, progress);
+      newStateBucket = Math.min(Math.floor(ts * stateData.bucketCount), stateData.bucketCount - 1);
+    }
+
+    cityLitUntil = newCityBucket + 1;   // edges with b < cityLitUntil are lit
+    stateLitUntil = newStateBucket + 1;
+
+    // Timeline indicator: only update on bucket change (cheap).
+    if (progress <= PHASES.CITY_HOLD.end) {
+      if (newCityBucket !== lastCityBucket) {
+        if (newCityBucket >= 0) updateTimeline(cityData.bucketDates[newCityBucket]);
+        lastCityBucket = newCityBucket;
+      }
+    } else if (progress > PHASES.ZOOM_OUT.end) {
+      if (newStateBucket !== lastStateBucket) {
+        if (newStateBucket >= 0) updateTimeline(stateData.bucketDates[newStateBucket]);
+        lastStateBucket = newStateBucket;
+      }
+    } else {
+      // Zoom-out: hide indicator
+      if (timelineIndicator.style.opacity !== '0') {
+        timelineIndicator.style.opacity = '0';
+        mobileTimelineIndicator.style.opacity = '0';
+      }
+    }
+  }
+
+  // --- Stroke all edges of a kind in two passes (unlit + lit), grouped
+  // by highway type. strokeStyle + lineWidth are set ONCE per type pass,
+  // not per edge — the inner loop is just ctx.stroke(Path2D). ---
+  function drawEdges(edges, paths, litUntil, opacity, zoomDim, kind) {
+    var styles = STROKE_STYLES[kind];
+    var byType = edges._byType;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Pass 1: unlit (base color, per-type width and opacity)
+    ctx.strokeStyle = palette.roadBase;
+    for (var k = 0; k < TYPE_KEYS.length; k++) {
+      var typeKey = TYPE_KEYS[k];
+      var st = styles[typeKey];
+      if (!st) continue;
+      var indices = byType[typeKey];
+      if (!indices || !indices.length) continue;
+      ctx.lineWidth = st.baseWidth;
+      ctx.globalAlpha = opacity * st.baseOpacity;
+      for (var i = 0; i < indices.length; i++) {
+        var idx = indices[i];
+        var e = edges[idx];
+        if (e.b >= 0 && e.b < litUntil) continue;
+        ctx.stroke(paths[idx]);
+      }
+    }
+
+    // Pass 2: lit (highlight color, or base color if dimmed during zoom-out)
+    if (litUntil > 0) {
+      ctx.strokeStyle = zoomDim ? palette.roadBase : palette.roadHighlight;
+      var litAlpha = zoomDim ? 0.5 : 0.9;
+      for (var k = 0; k < TYPE_KEYS.length; k++) {
+        var typeKey = TYPE_KEYS[k];
+        var st = styles[typeKey];
+        if (!st) continue;
+        var indices = byType[typeKey];
+        if (!indices || !indices.length) continue;
+        ctx.lineWidth = zoomDim ? st.baseWidth : st.litWidth;
+        ctx.globalAlpha = opacity * litAlpha;
+        for (var i = 0; i < indices.length; i++) {
+          var idx = indices[i];
+          var e = edges[idx];
+          if (e.b < 0 || e.b >= litUntil) continue;
+          ctx.stroke(paths[idx]);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawWater(paths, opacity, includeCityExtension) {
+    if (!paths.length && !includeCityExtension) return;
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = palette.waterFill;
+    if (includeCityExtension && cityWaterExtensionRect) {
+      var r = cityWaterExtensionRect;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    for (var i = 0; i < paths.length; i++) ctx.fill(paths[i], 'evenodd');
+    ctx.globalAlpha = 1;
+  }
+
+  function drawStateWaterExtension(opacity) {
+    if (!stateWaterExtensionPath) return;
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = palette.waterFill;
+    ctx.fill(stateWaterExtensionPath, 'evenodd');
+    ctx.globalAlpha = 1;
+  }
+
+  // --- Position HTML labels: their state-coord position is mapped to
+  // CSS pixels via the same camera transform used for canvas drawing. ---
+  function positionLabels(camera, sCanvas, txCanvas, tyCanvas) {
+    var i, el, sx, sy, cssX, cssY;
+    var showCity = camera.opacities.cityLabels > 0.01;
+    var showState = camera.opacities.stateLabels > 0.01;
+
+    for (i = 0; i < cityLabelEls.length; i++) {
+      el = cityLabelEls[i];
+      if (showCity) {
+        var pos = cityLabelStatePositions[i];
+        if (pos) {
+          cssX = (pos.x * sCanvas + txCanvas) / DPR;
+          cssY = (pos.y * sCanvas + tyCanvas) / DPR;
+          el.style.transform = 'translate(' + cssX + 'px, ' + cssY + 'px) translate(-50%, -50%)';
+          el.style.opacity = camera.opacities.cityLabels;
+        }
+      } else if (el.style.opacity !== '0') {
+        el.style.opacity = '0';
+      }
+    }
+
+    for (i = 0; i < stateLabelEls.length; i++) {
+      el = stateLabelEls[i];
+      if (showState) {
+        sx = parseFloat(el.dataset.sx);
+        sy = parseFloat(el.dataset.sy);
+        cssX = (sx * sCanvas + txCanvas) / DPR;
+        cssY = (sy * sCanvas + tyCanvas) / DPR;
+        el.style.transform = 'translate(' + cssX + 'px, ' + cssY + 'px) translate(-50%, -50%)';
+        el.style.opacity = camera.opacities.stateLabels;
+      } else if (el.style.opacity !== '0') {
+        el.style.opacity = '0';
+      }
+    }
+  }
+
+  // --- Main render: one call per scroll frame. ---
+  function render(progress) {
+    if (!dataReady || !displayedCityVB || !displayedStateVB) return;
+    var camera = computeCamera(progress);
+    var vb = camera.visibleVB;
+    if (!vb) return;
+
+    var cw = canvas.width;
+    var ch = canvas.height;
+    var aspect = window.innerWidth / window.innerHeight;
+    var mode = aspect < 1.0 ? 'meet' : 'slice';
+    var scaleX = cw / vb[2];
+    var scaleY = ch / vb[3];
+    var s = mode === 'meet' ? Math.min(scaleX, scaleY) : Math.max(scaleX, scaleY);
+    var tx = (cw - vb[2] * s) / 2 - vb[0] * s;
+    var ty = (ch - vb[3] * s) / 2 - vb[1] * s;
+
+    // Reset transform, fill bg
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = palette.mapBg;
+    ctx.fillRect(0, 0, cw, ch);
+
+    // Apply camera (state coords → canvas device pixels)
+    ctx.setTransform(s, 0, 0, s, tx, ty);
+
+    // Terrain (under everything else)
+    if (camera.opacities.stateTerrain > 0 && terrainImage && terrainImage.complete && terrainImage.naturalWidth > 0) {
+      ctx.globalAlpha = camera.opacities.stateTerrain * 0.32;
+      ctx.drawImage(terrainImage, 40, 571, 4370, 2308);
+      ctx.globalAlpha = 1;
+    }
+
+    // State water
+    if (camera.opacities.stateWater > 0) {
+      drawStateWaterExtension(camera.opacities.stateWater);
+      drawWater(stateWaterPaths, camera.opacities.stateWater, false);
+    }
+
+    // State edges
+    if (camera.opacities.stateEdges > 0) {
+      drawEdges(stateEdges, statePaths, stateLitUntil, camera.opacities.stateEdges, camera.zoomDim, 'state');
+    }
+
+    // City water + city edges live in city coords; nest cityToStateMatrix
+    // on top of the camera transform.
+    if (camera.opacities.cityWater > 0 || camera.opacities.cityEdges > 0) {
+      ctx.save();
+      ctx.transform(
+        cityToStateMatrix.a, cityToStateMatrix.b,
+        cityToStateMatrix.c, cityToStateMatrix.d,
+        cityToStateMatrix.e, cityToStateMatrix.f
       );
-
-      if (bucket !== stateLastBucket) {
-        updateBuckets(stateBucketPaths, stateLastBucket, bucket);
-        stateLastBucket = bucket;
+      if (camera.opacities.cityWater > 0) {
+        drawWater(cityWaterPaths, camera.opacities.cityWater, camera.cityWaterExtensionVisible);
       }
-
-      if (stateLastBucket >= 0) {
-        updateTimeline(stateData.bucketDates[stateLastBucket]);
+      if (camera.opacities.cityEdges > 0) {
+        drawEdges(cityEdges, cityPaths, cityLitUntil, camera.opacities.cityEdges, camera.zoomDim, 'city');
       }
-
-      setViewBox(stateDisplayVB);
-      cityEdgesGroup.style.display = 'none';
-      cityWaterGroup.style.display = 'none';
-      cityLabelsGroup.style.display = 'none';
-      stateEdgesGroup.style.opacity = '1';
-      stateWaterGroup.style.opacity = '1';
-      stateEdgesGroup.style.display = '';
-      stateWaterGroup.style.display = '';
-      stateTerrainGroup.style.display = '';
-      stateTerrainGroup.style.opacity = '1';
-      stateLabelsGroup.style.display = '';
-      stateLabelsGroup.style.opacity = '1';
+      ctx.restore();
     }
 
-    // Phase 4: Hold on state view
-    else {
-      setViewBox(stateDisplayVB);
-      cityEdgesGroup.style.display = 'none';
-      cityWaterGroup.style.display = 'none';
-      cityLabelsGroup.style.display = 'none';
-      stateEdgesGroup.style.opacity = '1';
-      stateWaterGroup.style.opacity = '1';
-      stateEdgesGroup.style.display = '';
-      stateWaterGroup.style.display = '';
-      stateTerrainGroup.style.display = '';
-      stateTerrainGroup.style.opacity = '1';
-      stateLabelsGroup.style.display = '';
-      stateLabelsGroup.style.opacity = '1';
+    // Position labels
+    positionLabels(camera, s, tx, ty);
 
-      if (stateLastBucket >= 0) {
-        updateTimeline(stateData.bucketDates[stateLastBucket]);
-      }
+    // Right-edge fade overlay: toggle visibility only on phase change.
+    var fadeVisible = camera.phase !== 'city';
+    if (fadeVisible !== lastEdgeFadeVisible) {
+      lastEdgeFadeVisible = fadeVisible;
+      stateEdgeFade.classList.toggle('visible', fadeVisible);
     }
   }
 
   // --- Scroll handler ---
   function onScroll() {
-    if (!ticking) {
-      requestAnimationFrame(function() {
-        updateForProgress(getScrollProgress());
-        ticking = false;
-      });
-      ticking = true;
-    }
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      var p = getScrollProgress();
+      updateBuckets(p);
+      render(p);
+      ticking = false;
+    });
   }
 
   // --- Load one dataset and start when both ready ---
+  // --- Crop a viewBox horizontally to a portrait-leaning aspect (1.2× viewport
+  // aspect), centered at `centerFrac` across its width. Mobile portrait only —
+  // landscape returns the source VB unchanged. ---
+  function cropPortraitVB(sourceVB, centerFrac) {
+    var aspect = window.innerWidth / window.innerHeight;
+    if (aspect >= 1.0) return sourceVB;
+    var fullW = sourceVB[2];
+    var fullH = sourceVB[3];
+    var cropAspect = aspect * 1.2;
+    var newW = fullH * cropAspect;
+    if (newW >= fullW) return sourceVB;
+    var centerX = sourceVB[0] + fullW * centerFrac;
+    return [centerX - newW / 2, sourceVB[1], newW, fullH];
+  }
+
+  function computeDisplayedVBs() {
+    if (cityAreaVB) displayedCityVB = cropPortraitVB(cityAreaVB, 0.55);
+    if (stateDisplayVB) displayedStateVB = cropPortraitVB(stateDisplayVB, 0.555);
+  }
+
+  // --- Resize handler: recompute everything that depends on viewport size ---
+  function onResize() {
+    resizeCanvas();
+    computeDisplayedVBs();
+    recomputeScrollGeometry();
+    if (dataReady) render(getScrollProgress());
+  }
+
+  // --- One-time setup after both city + state datasets load ---
   function onMapLoaded() {
     loadedCount++;
-    if (loadedCount === 2) {
-      // Parse viewBoxes
-      var cityVB = parseViewBox(cityData.viewBox);
-      fullStateVB = parseViewBox(stateData.viewBox);
+    if (loadedCount !== 2) return;
 
-      // Compute the tight data extent within the state SVG coord space.
-      // The state JSON's viewBox (4450x3450) has padding around the data;
-      // the actual rendered data sits in a smaller rectangle. Using THIS
-      // as the displayed viewBox in state phases makes the annotated map
-      // fill the viewport edge-to-edge — no bg padding visible around the
-      // map content.
-      stateDisplayVB = (function (geo, vb) {
-        var dataW = geo.east - geo.west;
-        var dataH = geo.north - geo.south;
-        var availW = vb[2] - 2 * SVG_PADDING;
-        var availH = vb[3] - 2 * SVG_PADDING;
-        var scale = Math.min(availW / dataW, availH / dataH);
-        var offX = SVG_PADDING + (availW - dataW * scale) / 2;
-        var offY = SVG_PADDING + (availH - dataH * scale) / 2;
-        return [offX, offY, dataW * scale, dataH * scale];
-      })(stateData.geoBounds, fullStateVB);
+    var cityVB = parseViewBox(cityData.viewBox);
+    fullStateVB = parseViewBox(stateData.viewBox);
 
-      // Extend Pacific water west and south of the polygon's natural
-      // extent so its straight bbox-clipped edges fall outside the visible
-      // viewBox. L-shaped path covers (1) the western letterbox area and
-      // (2) the southwestern strip below the polygon's south extent (~y=2879)
-      // out to where land begins (~x=500, the southern WA coast). Some
-      // coastal land south of Olympia is colored as water by this rect,
-      // which the user explicitly OK'd as a stylistic trade-off.
-      var stateWaterExtension = document.createElementNS(SVG_NS, 'path');
-      var vbW = fullStateVB[2];
-      var vbH = fullStateVB[3];
-      var dPath = [
-        'M', -vbW, 0,
-        'L', 100, 0,
-        'L', 100, 2800,
-        'L', 500, 2800,
-        'L', 500, vbH,
-        'L', -vbW, vbH,
-        'Z'
-      ].join(' ');
-      stateWaterExtension.setAttribute('d', dPath);
-      stateWaterExtension.setAttribute('fill', 'var(--water-fill)');
-      stateWaterGroup.insertBefore(stateWaterExtension, stateWaterGroup.firstChild);
+    // Tight state extent (minus the JSON's padding).
+    stateDisplayVB = (function (geo, vb) {
+      var dataW = geo.east - geo.west;
+      var dataH = geo.north - geo.south;
+      var availW = vb[2] - 2 * SVG_PADDING;
+      var availH = vb[3] - 2 * SVG_PADDING;
+      var scale = Math.min(availW / dataW, availH / dataH);
+      var offX = SVG_PADDING + (availW - dataW * scale) / 2;
+      var offY = SVG_PADDING + (availH - dataH * scale) / 2;
+      return [offX, offY, dataW * scale, dataH * scale];
+    })(stateData.geoBounds, fullStateVB);
 
-      // Compute where city falls in state SVG space
-      cityAreaVB = computeCityAreaInStateSVG(
-        cityData.geoBounds, stateData.geoBounds, fullStateVB
-      );
+    cityAreaVB = computeCityAreaInStateSVG(cityData.geoBounds, stateData.geoBounds, fullStateVB);
+    computeDisplayedVBs();
 
-      // Compute and apply transform to position city edges in state SVG space
-      var xform = computeCityToStateTransform(
-        cityData.geoBounds, stateData.geoBounds, cityVB, fullStateVB
-      );
-      var cityTransform = 'translate(' + xform.tx + ',' + xform.ty + ') scale(' + xform.s + ')';
-      cityEdgesGroup.setAttribute('transform', cityTransform);
-      cityWaterGroup.setAttribute('transform', cityTransform);
-      cityLabelsGroup.setAttribute('transform', cityTransform);
+    var xform = computeCityToStateTransform(
+      cityData.geoBounds, stateData.geoBounds, cityVB, fullStateVB
+    );
+    cityToStateMatrix = new DOMMatrix([xform.s, 0, 0, xform.s, xform.tx, xform.ty]);
 
-      // Add city labels using geo coordinates → city SVG space
-      var cityGeo = cityData.geoBounds;
-      var cDataW = cityGeo.east - cityGeo.west;
-      var cDataH = cityGeo.north - cityGeo.south;
-      var cAvailW = cityVB[2] - 2 * SVG_PADDING;
-      var cAvailH = cityVB[3] - 2 * SVG_PADDING;
-      var cScale = Math.min(cAvailW / cDataW, cAvailH / cDataH);
-      var cOX = SVG_PADDING + (cAvailW - cDataW * cScale) / 2;
-      var cOY = SVG_PADDING + (cAvailH - cDataH * cScale) / 2;
+    // Parse all road edges into Path2D arrays + per-type indices. This is
+    // the expensive one-time cost; render only calls ctx.stroke on
+    // already-parsed paths.
+    var stateBuild = buildPathsAndEdges(stateData);
+    statePaths = stateBuild.paths;
+    stateEdges = stateBuild.edges;
 
-      // Extend water westward past the data extent so Puget Sound reaches the
-      // page edge instead of cutting abruptly at the city's western bound.
-      // Only visible during the city phase — hidden during zoom-out and after
-      // because the rect's rectangular shape would otherwise show as a blob
-      // over Kitsap Peninsula land while the state map fades in.
-      cityWaterExtension = document.createElementNS(SVG_NS, 'rect');
-      cityWaterExtension.setAttribute('x', -cityVB[2]);
-      cityWaterExtension.setAttribute('y', 0);
-      cityWaterExtension.setAttribute('width', cOX + cityVB[2]);
-      cityWaterExtension.setAttribute('height', cityVB[3]);
-      cityWaterExtension.setAttribute('fill', 'var(--water-fill)');
-      cityWaterGroup.insertBefore(cityWaterExtension, cityWaterGroup.firstChild);
+    var cityBuild = buildPathsAndEdges(cityData);
+    cityPaths = cityBuild.paths;
+    cityEdges = cityBuild.edges;
 
-      function geoToCitySVG(lng, lat) {
-        var x = (lng - cityGeo.west) * cScale + cOX;
-        var y = cityVB[3] - ((lat - cityGeo.south) * cScale + cOY);
-        return [x, y];
-      }
+    // Water polygons (kept in their native coord systems; city water is
+    // drawn under the cityToStateMatrix transform).
+    stateWaterPaths = buildWaterPaths(stateWaterData);
+    cityWaterPaths = buildWaterPaths(cityWaterData);
 
-      var labels = [
-        { name: 'Seattle', lng: -122.3321, lat: 47.6062, size: 0.014 },
-        { name: 'Bellevue', lng: -122.2015, lat: 47.6101, size: 0.011 }
-      ];
-      for (var i = 0; i < labels.length; i++) {
-        var pos = geoToCitySVG(labels[i].lng, labels[i].lat);
-        var text = document.createElementNS(SVG_NS, 'text');
-        text.setAttribute('x', pos[0]);
-        text.setAttribute('y', pos[1]);
-        text.setAttribute('font-size', cityVB[2] * labels[i].size);
-        text.textContent = labels[i].name;
-        cityLabelsGroup.appendChild(text);
-      }
+    // State water extension: L-shape covering Pacific west of the polygon
+    // extent + the southwestern strip past the data's south edge.
+    var vbW = fullStateVB[2];
+    var vbH = fullStateVB[3];
+    var extD = 'M' + (-vbW) + ',0 L100,0 L100,2800 L500,2800 L500,' + vbH + ' L' + (-vbW) + ',' + vbH + ' Z';
+    stateWaterExtensionPath = new Path2D(extD);
 
-      // Set initial viewBox to city area
-      setViewBox(cityAreaVB);
+    // City water extension rect — drawn inside cityToStateMatrix so the
+    // coords are city-local.
+    var cityGeo = cityData.geoBounds;
+    var cDataW = cityGeo.east - cityGeo.west;
+    var cDataH = cityGeo.north - cityGeo.south;
+    var cAvailW = cityVB[2] - 2 * SVG_PADDING;
+    var cAvailH = cityVB[3] - 2 * SVG_PADDING;
+    var cScale = Math.min(cAvailW / cDataW, cAvailH / cDataH);
+    var cOX = SVG_PADDING + (cAvailW - cDataW * cScale) / 2;
+    var cOY = SVG_PADDING + (cAvailH - cDataH * cScale) / 2;
+    cityWaterExtensionRect = {
+      x: -cityVB[2],
+      y: 0,
+      w: cOX + cityVB[2],
+      h: cityVB[3]
+    };
 
-      // Hide state layers initially
-      stateEdgesGroup.style.display = 'none';
-      stateWaterGroup.style.display = 'none';
+    // Pre-compute city label positions in state coords (so render just
+    // applies the camera transform). Done at load; recomputed on resize
+    // only because cityToStateMatrix doesn't change unless data changes.
+    cityLabelStatePositions = cityLabelEls.map(function (el) {
+      var lng = parseFloat(el.dataset.lng);
+      var lat = parseFloat(el.dataset.lat);
+      // lng/lat → city SVG → state SVG via the same transform
+      var cx = (lng - cityGeo.west) * cScale + cOX;
+      var cy = cityVB[3] - ((lat - cityGeo.south) * cScale + cOY);
+      return { x: cx * xform.s + xform.tx, y: cy * xform.s + xform.ty };
+    });
 
-      loadingMsg.classList.add('hidden');
-      buildTimeline();
-      setupTimelineInteraction();
-      updateAspectRatio();
-      window.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('resize', updateAspectRatio);
-      onScroll();
+    // Pick reasonable CSS font-sizes for HTML labels. The original SVG
+    // sized them in viewBox units (cityVB[2] * data-size), which scaled
+    // with the camera. For HTML overlays we use fixed CSS px — picked to
+    // look right at typical city zoom.
+    for (var i = 0; i < cityLabelEls.length; i++) {
+      var ratio = parseFloat(cityLabelEls[i].dataset.size) || 0.014;
+      cityLabelEls[i].style.fontSize = Math.max(12, ratio * 1100) + 'px';
     }
+
+    dataReady = true;
+    loadingMsg.classList.add('hidden');
+    buildTimeline();
+    setupTimelineInteraction();
+    resizeCanvas();
+    recomputeScrollGeometry();
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    // Initial paint
+    updateBuckets(getScrollProgress());
+    render(getScrollProgress());
   }
 
-  // The map data has aspect ratio ~1.89 (wider than tall). On wide
-  // viewports (desktop, phone in landscape) slice fills the viewport
-  // edge-to-edge with a tiny side crop. On narrow viewports (phone in
-  // portrait, tablet portrait) slice would crop ~70% of the map; switch
-  // to meet so the full map shows with top/bottom letterbox bars
-  // (which match the page bg, so they read as natural padding).
-  function updateAspectRatio() {
-    var aspect = window.innerWidth / window.innerHeight;
-    var mode = aspect < 1.0 ? 'meet' : 'slice';
-    mapSvg.setAttribute('preserveAspectRatio', 'xMidYMid ' + mode);
-  }
-
-  // --- Init ---
+  // --- Init: fetch data, kick everything off ---
   async function init() {
     try {
+      var mobile = window.innerWidth / window.innerHeight < 1.0;
+      var cityUrl = mobile ? '/assets/data/city-roads.mobile.json' : '/assets/data/city-roads.json';
+
       var responses = await Promise.all([
-        fetch('/assets/data/city-roads.json'),
+        fetch(cityUrl),
         fetch('/assets/data/state-roads.json'),
         fetch('/assets/data/city-water.json'),
         fetch('/assets/data/state-water.json')
       ]);
 
+      // Mobile fallback to full file if the build-time mobile JSON is missing
+      if (!responses[0].ok && mobile) {
+        responses[0] = await fetch('/assets/data/city-roads.json');
+      }
       if (!responses[0].ok) throw new Error('City: HTTP ' + responses[0].status);
       if (!responses[1].ok) throw new Error('State: HTTP ' + responses[1].status);
-      // Water files are optional — degrade gracefully
-      var cityWaterData = responses[2].ok ? await responses[2].json() : null;
-      var stateWaterData = responses[3].ok ? await responses[3].json() : null;
+
+      cityWaterData = responses[2].ok ? await responses[2].json() : null;
+      stateWaterData = responses[3].ok ? await responses[3].json() : null;
+
+      // Load hillshade in parallel (non-blocking); rerender once available.
+      terrainImage = new Image();
+      terrainImage.src = '/assets/data/state-hillshade.jpg';
+      terrainImage.addEventListener('load', function () {
+        if (dataReady) render(getScrollProgress());
+      });
 
       cityData = await responses[0].json();
-      if (cityWaterData) renderWater(cityWaterGroup, cityWaterData.paths);
-      cityBucketPaths = renderEdges('cityEdgesGroup', cityData);
       onMapLoaded();
-
       stateData = await responses[1].json();
-      if (stateWaterData) renderWater(stateWaterGroup, stateWaterData.paths);
-      stateBucketPaths = renderEdges('stateEdgesGroup', stateData);
       onMapLoaded();
-
     } catch (error) {
       console.error('Error:', error);
       loadingMsg.textContent = 'Error loading data: ' + error.message;
